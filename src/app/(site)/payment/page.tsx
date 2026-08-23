@@ -1,0 +1,22 @@
+import { Metadata } from "next";
+import { Bi } from "@/components/bi";
+import { Suspense } from "react";
+import PaymentClient from "./payment-client";
+
+export const metadata: Metadata = {
+  title: "Complete Payment | APPZENO Sarkari Portal",
+  description: "Complete your advertisement payment",
+};
+
+export default function PaymentPage() {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+      <h1 className="font-display text-3xl font-bold text-navy-950 sm:text-4xl">
+        <Bi hi="भुगतान पूरा करें" en="Complete Your Payment" />
+      </h1>
+      <Suspense fallback={<div className="mt-8 grid place-items-center py-24"><span className="size-8 animate-spin rounded-full border-[3px] border-navy-200 border-t-saffron-500"></span></div>}>
+        <PaymentClient />
+      </Suspense>
+    </div>
+  );
+}

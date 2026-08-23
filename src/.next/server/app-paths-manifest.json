@@ -1,0 +1,5 @@
+{
+  "/api/cookies/settings/route": "app/api/cookies/settings/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/(site)/page": "app/(site)/page.js"
+}
