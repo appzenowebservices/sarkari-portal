@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -29,9 +30,6 @@ type Subscriber = {
 };
 
 export default function AdminSubscribersPage() {
-  const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
@@ -49,44 +47,33 @@ export default function AdminSubscribersPage() {
 
   const { toast, show, node } = useToast();
 
-  const load = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(pageSize),
-      });
-      if (statusFilter !== "all") params.set("status", statusFilter);
-      if (sourceFilter !== "all") params.set("source", sourceFilter);
-      if (q.trim()) params.set("q", q.trim());
-
-      const res = await fetch(`/api/admin/newsletter/subscribers?${params}`);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `API error: ${res.status}`);
-      }
-      const data = (await res.json()) as { subscribers: Subscriber[]; total: number };
-      setSubscribers(data.subscribers ?? []);
-      setTotal(data.total ?? 0);
-    } catch (err) {
-      console.error("Failed to load subscribers:", err);
-      show("सब्सक्राइबर नहीं मिले", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react/hooks/exhaustive-deps
-  }, [page, pageSize, statusFilter, sourceFilter, q]);
+  const utils = api.useUtils();
+  const listQuery = api.newsletter.adminList.useQuery({
+    page,
+    limit: pageSize,
+    status: statusFilter !== "all" ? statusFilter : undefined,
+  });
+  const subscribers = useMemo(() => (listQuery.data?.subscribers ?? []) as unknown as Subscriber[], [listQuery.data]);
+  const total = listQuery.data?.total ?? 0;
+  const loading = listQuery.isLoading;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (listQuery.isError) show("सब्सक्राइबर नहीं मिले", "err");
+  }, [listQuery.isError, show]);
+
+  const updateMut = api.newsletter.adminUpdate.useMutation();
+  const deleteMut = api.newsletter.adminDelete.useMutation();
+  const bulkMut = api.newsletter.adminBulk.useMutation();
+  const subscribeMut = api.newsletter.subscribe.useMutation();
 
   const filtered = useMemo(() => {
+    const bySource = sourceFilter === "all" ? subscribers : subscribers.filter((s) => s.source === sourceFilter);
     const term = q.trim().toLowerCase();
-    if (!term) return subscribers;
-    return subscribers.filter(
+    if (!term) return bySource;
+    return bySource.filter(
       (s) => s.email.toLowerCase().includes(term) || (s.name?.toLowerCase() || "").includes(term)
     );
-  }, [subscribers, q]);
+  }, [subscribers, q, sourceFilter]);
 
   const activeCount = subscribers.filter((s) => s.status === "active" && s.isVerified).length;
   const unverifiedCount = subscribers.filter((s) => !s.isVerified).length;
@@ -114,21 +101,17 @@ export default function AdminSubscribersPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(editing ? `/api/admin/newsletter/subscribers/${editing.id}` : "/api/admin/newsletter/subscribers", {
-        method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "सब्सक्राइबर अपडेट हुआ" : "नई सब्सक्राइबर जुड़ी");
-        setModal(false);
-        await load();
+      if (editing) {
+        await updateMut.mutateAsync({ id: editing.id, status: form.status });
+        show("सब्सक्राइबर अपडेट हुआ");
       } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
+        await subscribeMut.mutateAsync({ email: form.email.trim(), name: form.name.trim() });
+        show("नई सब्सक्राइबर जुड़ी");
       }
+      setModal(false);
+      await utils.newsletter.adminList.invalidate();
     } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show("सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -138,19 +121,10 @@ export default function AdminSubscribersPage() {
     if (selected.length === 0) return;
     if (!window.confirm(`क्या आप वाकई ${selected.length} सब्सक्राइबर हटाना चाहते हैं?`)) return;
     try {
-      const res = await fetch("/api/admin/newsletter/subscribers/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", ids: selected }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string; modified?: number };
-      if (res.ok && data.ok) {
-        show(`${data.modified} सब्सक्राइबर हटा दिए गए`);
-        setSelected([]);
-        await load();
-      } else {
-        show(data.error ?? "हटाने में विफल", "err");
-      }
+      await bulkMut.mutateAsync({ ids: selected, action: "delete" });
+      show(`${selected.length} सब्सक्राइबर हटा दिए गए`);
+      setSelected([]);
+      await utils.newsletter.adminList.invalidate();
     } catch {
       show("नेटवर्क त्रुटि", "err");
     }
@@ -158,30 +132,24 @@ export default function AdminSubscribersPage() {
 
   const removeSingle = async (s: Subscriber) => {
     if (!window.confirm(`"${s.email}" को हटाना है?`)) return;
-    const res = await fetch(`/api/admin/newsletter/subscribers/${s.id}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await deleteMut.mutateAsync({ id: s.id });
       show("सब्सक्राइबर हटा दिया गया");
-      await load();
-    } else {
+      await utils.newsletter.adminList.invalidate();
+    } catch {
       show("हटाने में विफल", "err");
     }
   };
 
   const bulkStatus = async (status: "subscribe" | "unsubscribe") => {
     if (selected.length === 0) return;
-    const action = status === "subscribe" ? "subscribe" : "unsubscribe";
-    const res = await fetch("/api/admin/newsletter/subscribers/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ids: selected }),
-    });
-    const data = (await res.json()) as { ok?: boolean; error?: string; modified?: number };
-    if (res.ok && data.ok) {
-      show(`${data.modified} ${status === "subscribe" ? "सक्रिय" : "निष्क्रिय"} कर दिए गए`);
+    try {
+      await bulkMut.mutateAsync({ ids: selected, action: status === "subscribe" ? "activate" : "unsubscribe" });
+      show(`${selected.length} ${status === "subscribe" ? "सक्रिय" : "निष्क्रिय"} कर दिए गए`);
       setSelected([]);
-      await load();
-    } else {
-      show(data.error ?? "ऑपरेशन विफल", "err");
+      await utils.newsletter.adminList.invalidate();
+    } catch {
+      show("नेटवर्क त्रुटि", "err");
     }
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -58,9 +59,6 @@ const EMPTY_FORM = {
 };
 
 export default function AdminServicesPage() {
-  const [services, setServices] = useState<Svc[]>([]);
-  const [cats, setCats] = useState<Cat[]>([]);
-  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -71,6 +69,62 @@ export default function AdminServicesPage() {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { toast, show, node } = useToast();
+
+  const utils = api.useUtils();
+  const catsQuery = api.catalog.adminCategories.useQuery();
+  const servicesQuery = api.catalog.adminServices.useQuery({ page: 1, limit: 500 });
+  const loading = servicesQuery.isLoading || catsQuery.isLoading;
+
+  const upsertSvc = api.catalog.upsertService.useMutation({
+    onSuccess: () => utils.catalog.adminServices.invalidate(),
+  });
+  const deleteSvc = api.catalog.deleteService.useMutation({
+    onSuccess: () => utils.catalog.adminServices.invalidate(),
+  });
+  const enableTags = api.catalog.enableNewTags.useMutation({
+    onSuccess: () => utils.catalog.adminServices.invalidate(),
+  });
+
+  const cats: Cat[] = useMemo(() => {
+    const raw = catsQuery.data ?? [];
+    return [...raw]
+      .sort((a, b) => (a.titleEn ?? "").localeCompare(b.titleEn ?? ""))
+      .map((c) => ({
+        id: c.id,
+        slug: c.slug,
+        titleHi: c.titleHi,
+        titleEn: c.titleEn,
+        icon: c.icon,
+        color: c.color,
+        isActive: c.isActive,
+      }));
+  }, [catsQuery.data]);
+
+  const catsById = useMemo(() => new Map(cats.map((c) => [c.id, c])), [cats]);
+
+  const services: Svc[] = useMemo(() => {
+    const raw = servicesQuery.data?.services ?? [];
+    return raw.map((s) => ({
+      id: s.id,
+      categoryIds: s.categoryIds ?? [],
+      titleHi: s.titleHi ?? "",
+      titleEn: s.titleEn ?? "",
+      url: s.url ?? "",
+      descriptionHi: s.descriptionHi ?? "",
+      descriptionEn: s.descriptionEn ?? "",
+      tags: s.tags ?? "",
+      isFeatured: s.isFeatured ?? false,
+      isNew: s.isNew ?? false,
+      isActive: s.isActive ?? true,
+      clickCount: s.clickCount ?? 0,
+      createdAt:
+        s.createdAt instanceof Date ? s.createdAt.toISOString() : String(s.createdAt ?? ""),
+      categories: (s.categoryIds ?? [])
+        .map((id) => catsById.get(id))
+        .filter((c): c is Cat => Boolean(c))
+        .map((c) => ({ slug: c.slug, titleHi: c.titleHi, titleEn: c.titleEn, color: c.color, icon: c.icon })),
+    }));
+  }, [servicesQuery.data, catsById]);
 
   const { translateAndSync } = useTranslate();
 
@@ -83,38 +137,12 @@ export default function AdminServicesPage() {
     }
   };
 
-  const load = useCallback(async () => {
-    try {
-      const [svcRes, catRes] = await Promise.all([
-        fetch("/api/admin/services"),
-        fetch("/api/admin/categories"),
-      ]);
-
-      if (!svcRes.ok) {
-        const errData = await svcRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Services API error: ${svcRes.status}`);
-      }
-      if (!catRes.ok) {
-        const errData = await catRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Categories API error: ${catRes.status}`);
-      }
-
-      const svcData = (await svcRes.json()) as { services: Svc[] };
-      const catData = (await catRes.json()) as { categories: Cat[] };
-      setServices(svcData.services ?? []);
-      setCats((catData.categories ?? []).sort((a, b) => a.titleEn.localeCompare(b.titleEn)));
-    } catch (err) {
-      console.error("Failed to load services:", err);
-      show("सेवाएं लोड नहीं हो पाईं", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react/hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = async () => {
+    await Promise.all([
+      utils.catalog.adminServices.invalidate(),
+      utils.catalog.adminCategories.invalidate(),
+    ]);
+  };
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -184,21 +212,13 @@ export default function AdminServicesPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(editing ? `/api/admin/services/${editing.id}` : "/api/admin/services", {
-        method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "सेवा अपडेट हुई" : "नई सेवा जुड़ गई");
-        setModal(false);
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      await upsertSvc.mutateAsync(
+        editing ? { id: editing.id, ...form } : { ...form },
+      );
+      show(editing ? "सेवा अपडेट हुई" : "नई सेवा जुड़ गई");
+      setModal(false);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -206,22 +226,20 @@ export default function AdminServicesPage() {
 
   const remove = async (s: Svc) => {
     if (!window.confirm(`"${s.titleHi}" को हटाना है?`)) return;
-    const res = await fetch(`/api/admin/services/${s.id}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await deleteSvc.mutateAsync({ id: s.id });
       show("सेवा हटा दी गई");
-      await load();
-    } else {
+    } catch {
       show("हटाने में विफल", "err");
     }
   };
 
   const toggleActive = async (s: Svc) => {
-    await fetch(`/api/admin/services/${s.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !s.isActive }),
-    });
-    await load();
+    try {
+      await upsertSvc.mutateAsync({ id: s.id, isActive: !s.isActive });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   return (
@@ -245,11 +263,10 @@ export default function AdminServicesPage() {
             type="button"
             onClick={async () => {
               if (!window.confirm("Re-enable 'New' tags for all services with less than 50 clicks?")) return;
-              const res = await fetch("/api/admin/services/enable-new-tags", { method: "POST" });
-              if (res.ok) {
+              try {
+                await enableTags.mutateAsync();
                 show("All eligible services marked as New");
-                await load();
-              } else {
+              } catch {
                 show("Failed to enable new tags", "err");
               }
             }}

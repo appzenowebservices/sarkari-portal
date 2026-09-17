@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import { DeleteButton, EmptyRow, Field, inputCls, SortTh, Spinner, useToast } from "@/components/admin/ui";
 import { AdminTable } from "@/components/admin/table-pagination";
 import { SlidePanel } from "@/components/admin/slide-panel";
@@ -47,95 +48,82 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function AdminPrivacyRequestsPage() {
-  const [loading, setLoading] = useState(true);
-  const [requests, setRequests] = useState<PrivacyRequest[]>([]);
-  const [stats, setStats] = useState({ total: 0, received: 0, verificationRequired: 0, underReview: 0, processing: 0, completed: 0, rejected: 0 });
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<PrivacyRequest | null>(null);
   const [form, setForm] = useState({ status: "", priority: "", resolution: "", rejectionReason: "", internalNotes: "", assignedTo: "", reply: "" });
-  const [saving, setSaving] = useState(false);
   const { show } = useToast();
+  const utils = api.useUtils();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/privacy-requests");
-      const data = (await res.json()) as { requests: PrivacyRequest[]; stats: typeof stats };
-      if (res.ok) {
-        setRequests(data.requests || []);
-        setStats(data.stats || stats);
-      }
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
+  const listQuery = api.privacy.adminList.useQuery({ page: 1, limit: 100 });
+  const requests = useMemo(() => (listQuery.data?.items ?? []) as unknown as PrivacyRequest[], [listQuery.data]);
+  const stats = useMemo(() => {
+    const s = { total: listQuery.data?.total ?? requests.length, received: 0, verificationRequired: 0, underReview: 0, processing: 0, completed: 0, rejected: 0 };
+    for (const r of requests) {
+      if (r.status === "RECEIVED") s.received++;
+      else if (r.status === "VERIFICATION_REQUIRED" || r.status === "VERIFICATION_PENDING") s.verificationRequired++;
+      else if (r.status === "UNDER_REVIEW") s.underReview++;
+      else if (r.status === "PROCESSING") s.processing++;
+      else if (r.status === "COMPLETED") s.completed++;
+      else if (r.status === "REJECTED") s.rejected++;
     }
-  }, [show, stats]);
+    return s;
+  }, [requests, listQuery.data]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (listQuery.isError) show("लोड नहीं हो पाया", "err");
+  }, [listQuery.isError, show]);
 
-  const openEdit = async (req: PrivacyRequest) => {
+  const saveMut = api.privacy.adminUpdate.useMutation({
+    onSuccess: () => {
+      show("अपडेट हो गया");
+      setModal(false);
+      void utils.privacy.adminList.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const markMut = api.privacy.adminUpdate.useMutation({
+    onSuccess: () => {
+      void utils.privacy.adminList.invalidate();
+    },
+  });
+  const saving = saveMut.isPending;
+
+  const openEdit = (req: PrivacyRequest) => {
     setEditing(req);
     setForm({
       status: req.status,
       priority: req.priority,
-      resolution: req.resolution,
-      rejectionReason: req.rejectionReason,
-      internalNotes: req.internalNotes,
+      resolution: req.resolution ?? "",
+      rejectionReason: req.rejectionReason ?? "",
+      internalNotes: req.internalNotes ?? "",
       assignedTo: req.assignedTo || "",
       reply: req.reply || "",
     });
     setModal(true);
 
     if (!req.reviewStartedAt) {
-      try {
-        await fetch(`/api/admin/privacy-requests/${req.requestId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reviewStartedAt: new Date().toISOString() }),
-        });
-      } catch {
-        // ignore
-      }
+      const stamp: Record<string, string> = { reviewStartedAt: new Date().toISOString() };
+      markMut.mutate({ id: req.id, ...stamp });
     }
   };
 
-  const save = async () => {
+  const save = () => {
     if (!editing) return;
     if (form.status === "REJECTED" && !form.rejectionReason.trim()) {
       show("Rejection reason is required", "err");
       return;
     }
-    setSaving(true);
-    try {
-      const now = new Date().toISOString();
-      const updates: Record<string, unknown> = { ...form };
-
-      if (form.status === "COMPLETED" && !editing.completedAt) updates.completedAt = now;
-      if (form.status === "CLOSED" && !editing.closedAt) updates.closedAt = now;
-      if (!editing.verifiedAt && ["VERIFIED", "UNDER_REVIEW", "PROCESSING", "PARTIALLY_COMPLETED", "COMPLETED", "CLOSED", "REJECTED", "CANCELLED"].includes(form.status)) {
-        updates.verifiedAt = now;
-      }
-
-      const res = await fetch(`/api/admin/privacy-requests/${editing.requestId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      if (res.ok) {
-        show("अपडेट हो गया");
-        setModal(false);
-        await load();
-      } else {
-        show("सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
+    const now = new Date().toISOString();
+    const stamp: Record<string, string> = {};
+    if (form.status === "COMPLETED" && !editing.completedAt) stamp.completedAt = now;
+    if (form.status === "CLOSED" && !editing.closedAt) stamp.closedAt = now;
+    if (!editing.verifiedAt && ["VERIFIED", "UNDER_REVIEW", "PROCESSING", "PARTIALLY_COMPLETED", "COMPLETED", "CLOSED", "REJECTED", "CANCELLED"].includes(form.status)) {
+      stamp.verifiedAt = now;
     }
+    saveMut.mutate({ id: editing.id, ...form, ...stamp });
   };
 
-  if (loading) return <Spinner />;
+  if (listQuery.isLoading) return <Spinner />;
 
   return (
     <div>

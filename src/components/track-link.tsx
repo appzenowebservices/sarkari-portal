@@ -1,6 +1,7 @@
 "use client";
 
 import type { MouseEvent, ReactNode } from "react";
+import { api } from "@/trpc/react";
 
 /**
  * External link that fires a beacon to /api/click before opening
@@ -19,22 +20,11 @@ export function TrackLink({
   children: ReactNode;
   title?: string;
 }) {
+  const trackClick = api.catalog.trackClick.useMutation();
+
   const track = (e: MouseEvent<HTMLAnchorElement>) => {
     try {
-      const payload = JSON.stringify({ serviceId });
-      if ("sendBeacon" in navigator) {
-        navigator.sendBeacon(
-          "/api/click",
-          new Blob([payload], { type: "application/json" })
-        );
-      } else {
-        fetch("/api/click", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-          keepalive: true,
-        }).catch(() => {});
-      }
+      trackClick.mutate({ serviceId });
     } catch {
       /* never block navigation for analytics */
     }

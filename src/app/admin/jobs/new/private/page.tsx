@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import WordPressStyleEditor from "@/components/wordpress-style-editor";
+import { api } from "@/trpc/react";
 
 interface Company {
   id: string;
@@ -247,9 +248,7 @@ export default function PrivateJobPage() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
-  const [companySuggestions, setCompanySuggestions] = useState<Company[]>([]);
   const [showCompanySuggestions, setShowCompanySuggestions] = useState(false);
-  const [companySearchLoading, setCompanySearchLoading] = useState(false);
   const autosaveTimer = useRef<NodeJS.Timeout | null>(null);
   const companyDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -257,26 +256,15 @@ export default function PrivateJobPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }, []);
 
-  const fetchCompanySuggestions = useCallback(async (query: string) => {
-    if (query.length < 3) {
-      setCompanySuggestions([]);
-      setShowCompanySuggestions(false);
-      return;
-    }
-    setCompanySearchLoading(true);
-    try {
-      const res = await fetch(`/api/admin/companies?q=${encodeURIComponent(query)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCompanySuggestions(data.companies || []);
-        setShowCompanySuggestions(true);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setCompanySearchLoading(false);
-    }
-  }, []);
+  const createMut = api.job.create.useMutation();
+  const autosaveMut = api.job.autosave.useMutation();
+  const [companyQ, setCompanyQ] = useState("");
+  const companyQuery = api.ads.searchCompanies.useQuery(
+    { q: companyQ },
+    { enabled: companyQ.length >= 3 },
+  );
+  const companySuggestions = useMemo(() => (companyQuery.data ?? []) as unknown as Company[], [companyQuery.data]);
+  const companySearchLoading = companyQuery.isFetching;
 
   const handleCompanySelect = (company: Company) => {
     setForm((f) => ({
@@ -291,14 +279,13 @@ export default function PrivateJobPage() {
       recruiterPhone: company.recruiterPhone || "",
     }));
     setShowCompanySuggestions(false);
-    setCompanySuggestions([]);
   };
+  const jobQuery = api.job.adminGet.useQuery({ id: jobId ?? "" }, { enabled: !!jobId });
+
   useEffect(() => {
-    if (!jobId) return;
-    fetch(`/api/admin/jobs/${jobId}`)
-      .then((res) => res.ok ? res.json() : Promise.reject(res))
-      .then((data) => {
-        const job = data.job || data;
+    if (!jobQuery.data) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const job: any = jobQuery.data;
         setForm((f) => ({
           ...f,
           id: job.id || job._id,
@@ -367,54 +354,65 @@ export default function PrivateJobPage() {
           visibility: job.visibility || "Public",
           applicationLimit: job.applicationLimit || 0,
         }));
-      })
-      .catch(() => {});
-  }, [jobId]);
+  }, [jobQuery.data]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (form.title.trim()) {
-        fetch("/api/admin/jobs/autosave", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...form, titleEn: form.title }),
-        }).then(() => {
-          setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-        }).catch(() => {});
+        autosaveMut.mutate(
+          { id: form.id, data: { ...form, titleEn: form.title, titleHi: form.title } },
+          {
+            onSuccess: (res) => {
+              if (!form.id && res?.id) setForm((f) => (f.id ? f : { ...f, id: res.id }));
+              setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+            },
+          },
+        );
       }
     }, 3000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
   useEffect(() => {
     if (companyDebounceRef.current) clearTimeout(companyDebounceRef.current);
     companyDebounceRef.current = setTimeout(() => {
-      fetchCompanySuggestions(form.companyName);
+      setCompanyQ(form.companyName.trim());
     }, 500);
     return () => {
       if (companyDebounceRef.current) clearTimeout(companyDebounceRef.current);
     };
-  }, [form.companyName, fetchCompanySuggestions]);
+  }, [form.companyName]);
 
   const handleSave = async (status: JobStatus) => {
     if (status === "Published") setPublishing(true);
     else setSaving(true);
     try {
-      const res = await fetch("/api/admin/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, status, jobType: "private", titleEn: form.title, titleHi: form.title }),
+      const { id: _formId, ...rest } = form;
+      void _formId;
+      const saved = await createMut.mutateAsync({
+        ...rest,
+        titleEn: form.title,
+        titleHi: form.title,
+        organizationNameEn: form.companyName,
+        categoryNameEn: form.category,
+        totalVacancies: form.vacancies,
+        state: form.location,
+        locationNames: [form.location].filter(Boolean),
+        applicationLastDate: form.applicationDeadline,
+        minimumQualification: form.qualifications.join(", "),
+        minimumAge: form.ageFrom,
+        maximumAge: form.ageTo,
+        applyUrl: form.externalUrl,
+        status,
+        jobType: "private",
+        template: "private",
       });
-      const data = await res.json();
-      if (data.ok) {
-        setForm((f) => ({ ...f, id: data.job.id }));
-        setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-        alert(status === "Published" ? "Job published successfully!" : "Draft saved!");
-      } else {
-        alert(data.error || "Save failed");
-      }
-    } catch {
-      alert("Save failed");
+      setForm((f) => ({ ...f, id: saved.job.id }));
+      setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+      alert(status === "Published" ? "Job published successfully!" : "Draft saved!");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
       setPublishing(false);

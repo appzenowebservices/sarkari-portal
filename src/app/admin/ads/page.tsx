@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -98,8 +99,6 @@ function statusOf(ad: AdRow): { label: string; color: string } {
 }
 
 export default function AdminAdsPage() {
-  const [list, setList] = useState<AdRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<AdRow | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -108,6 +107,55 @@ export default function AdminAdsPage() {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { show, node } = useToast();
+
+  const utils = api.useUtils();
+  const adsQuery = api.ads.adminAds.useQuery();
+  const loading = adsQuery.isLoading;
+
+  const upsertAd = api.ads.upsertAd.useMutation({
+    onSuccess: () => utils.ads.adminAds.invalidate(),
+  });
+  const deleteAd = api.ads.deleteAd.useMutation({
+    onSuccess: () => utils.ads.adminAds.invalidate(),
+  });
+
+  const toISO = (v: unknown): string | null => {
+    if (!v) return null;
+    if (v instanceof Date) return v.toISOString();
+    if (typeof v === "string") return v;
+    try {
+      return new Date(v as string).toISOString();
+    } catch {
+      return null;
+    }
+  };
+
+  const list: AdRow[] = useMemo(() => {
+    const rows = adsQuery.data ?? [];
+    return rows.map((a) => ({
+      id: a.id,
+      variant: a.variant ?? "",
+      placement: a.placement ?? "",
+      titleHi: a.titleHi ?? "",
+      titleEn: a.titleEn ?? "",
+      descriptionHi: a.descriptionHi ?? "",
+      descriptionEn: a.descriptionEn ?? "",
+      linkUrl: a.linkUrl ?? "",
+      imageUrl: a.imageUrl ?? "",
+      buttonTextHi: a.buttonTextHi ?? "",
+      buttonTextEn: a.buttonTextEn ?? "",
+      bgColor: (a as { bgColor?: string }).bgColor ?? "#1f3b6e",
+      textColor: (a as { textColor?: string }).textColor ?? "#ffffff",
+      isPublished: a.isPublished ?? false,
+      publishAt: toISO(a.publishAt),
+      expiresAt: toISO(a.expiresAt),
+      sortOrder: a.sortOrder ?? 0,
+      clickCount: a.clickCount ?? 0,
+      impressionCount: a.impressionCount ?? 0,
+      createdAt:
+        a.createdAt instanceof Date ? a.createdAt.toISOString() : String(a.createdAt ?? ""),
+    }));
+  }, [adsQuery.data]);
 
   const { translateAndSync } = useTranslate();
 
@@ -119,21 +167,6 @@ export default function AdminAdsPage() {
       setSortDir("asc");
     }
   };
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/ads");
-      const data = (await res.json()) as { ads: AdRow[] };
-      setList(data.ads);
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return list;
@@ -198,21 +231,13 @@ export default function AdminAdsPage() {
         publishAt: form.publishAt || null,
         expiresAt: form.expiresAt || null,
       };
-      const res = await fetch(editing ? `/api/admin/ads/${editing.id}` : "/api/admin/ads", {
-        method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "विज्ञापन अपडेट हुआ" : "नया विज्ञापन बना");
-        setModal(false);
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      await upsertAd.mutateAsync(
+        editing ? { id: editing.id, ...payload } : { ...payload },
+      );
+      show(editing ? "विज्ञापन अपडेट हुआ" : "नया विज्ञापन बना");
+      setModal(false);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -220,18 +245,20 @@ export default function AdminAdsPage() {
 
   const remove = async (ad: AdRow) => {
     if (!window.confirm(`"${ad.titleHi || ad.titleEn}" विज्ञापन हटाना है?`)) return;
-    const res = await fetch(`/api/admin/ads/${ad.id}`, { method: "DELETE" });
-    if (res.ok) { show("विज्ञापन हटा दिया"); await load(); }
-    else show("हटाने में विफल", "err");
+    try {
+      await deleteAd.mutateAsync({ id: ad.id });
+      show("विज्ञापन हटा दिया");
+    } catch {
+      show("हटाने में विफल", "err");
+    }
   };
 
   const togglePublish = async (ad: AdRow) => {
-    await fetch(`/api/admin/ads/${ad.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isPublished: !ad.isPublished }),
-    });
-    await load();
+    try {
+      await upsertAd.mutateAsync({ id: ad.id, isPublished: !ad.isPublished });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   const set = (key: string, value: unknown) => setForm({ ...form, [key]: value });

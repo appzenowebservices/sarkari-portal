@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import { DeleteButton, EmptyRow, Field, inputCls, SortTh, Spinner, useToast } from "@/components/admin/ui";
 import { AdminTable } from "@/components/admin/table-pagination";
 import { SlidePanel } from "@/components/admin/slide-panel";
@@ -40,45 +41,77 @@ type DurationPlan = {
 type Tab = "ad-types" | "placements" | "duration-plans";
 
 export default function AdPricingPage() {
-  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("ad-types");
-  const [adTypes, setAdTypes] = useState<AdType[]>([]);
-  const [placements, setPlacements] = useState<Placement[]>([]);
-  const [durationPlans, setDurationPlans] = useState<DurationPlan[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<AdType | Placement | DurationPlan | null>(null);
   const [form, setForm] = useState<Record<string, unknown>>({});
-  const [saving, setSaving] = useState(false);
   const { show } = useToast();
+  const utils = api.useUtils();
 
-  const load = useCallback(async () => {
-    try {
-      const [typesRes, placementsRes, durationsRes] = await Promise.all([
-        fetch("/api/admin/ad-pricing/ad-types"),
-        fetch("/api/admin/ad-pricing/placements"),
-        fetch("/api/admin/ad-pricing/duration-plans"),
-      ]);
+  const typesQuery = api.ads.adminAdTypes.useQuery();
+  const placementsQuery = api.ads.adminPlacements.useQuery();
+  const plansQuery = api.ads.adminPlans.useQuery();
+  const loading = typesQuery.isLoading || placementsQuery.isLoading || plansQuery.isLoading;
+  const adTypes = useMemo(() => (typesQuery.data ?? []) as unknown as AdType[], [typesQuery.data]);
+  const placements = useMemo(() => (placementsQuery.data ?? []) as unknown as Placement[], [placementsQuery.data]);
+  const durationPlans = useMemo(() => (plansQuery.data ?? []) as unknown as DurationPlan[], [plansQuery.data]);
 
-      if (typesRes.ok) {
-        const data = await typesRes.json();
-        setAdTypes(data.adTypes || []);
-      }
-      if (placementsRes.ok) {
-        const data = await placementsRes.json();
-        setPlacements(data.placements || []);
-      }
-      if (durationsRes.ok) {
-        const data = await durationsRes.json();
-        setDurationPlans(data.durationPlans || []);
-      }
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-  }, [show]);
+  useEffect(() => {
+    if (typesQuery.isError || placementsQuery.isError || plansQuery.isError) show("लोड नहीं हो पाया", "err");
+  }, [typesQuery.isError, placementsQuery.isError, plansQuery.isError, show]);
 
-  useEffect(() => { void load(); }, [load]);
+  const upsertType = api.ads.upsertAdType.useMutation({
+    onSuccess: () => {
+      show(editing ? "अपडेट हो गया" : "जोड़ा गया");
+      setModal(false);
+      void utils.ads.adminAdTypes.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const upsertPlacement = api.ads.upsertPlacement.useMutation({
+    onSuccess: () => {
+      show(editing ? "अपडेट हो गया" : "जोड़ा गया");
+      setModal(false);
+      void utils.ads.adminPlacements.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const upsertPlan = api.ads.upsertPlan.useMutation({
+    onSuccess: () => {
+      show(editing ? "अपडेट हो गया" : "जोड़ा गया");
+      setModal(false);
+      void utils.ads.adminPlans.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const delType = api.ads.deleteAdType.useMutation({
+    onSuccess: () => {
+      show("हटा दिया गया");
+      void utils.ads.adminAdTypes.invalidate();
+    },
+    onError: () => show("हटाने में विफल", "err"),
+  });
+  const delPlacement = api.ads.deletePlacement.useMutation({
+    onSuccess: () => {
+      show("हटा दिया गया");
+      void utils.ads.adminPlacements.invalidate();
+    },
+    onError: () => show("हटाने में विफल", "err"),
+  });
+  const delPlan = api.ads.deletePlan.useMutation({
+    onSuccess: () => {
+      show("हटा दिया गया");
+      void utils.ads.adminPlans.invalidate();
+    },
+    onError: () => show("हटाने में विफल", "err"),
+  });
+  const saving = upsertType.isPending || upsertPlacement.isPending || upsertPlan.isPending || delType.isPending || delPlacement.isPending || delPlan.isPending;
+
+  const removeItem = (id: string) => {
+    if (tab === "ad-types") delType.mutate({ id });
+    else if (tab === "placements") delPlacement.mutate({ id });
+    else delPlan.mutate({ id });
+  };
 
   const openNew = () => {
     setEditing(null);
@@ -98,30 +131,40 @@ export default function AdPricingPage() {
     setModal(true);
   };
 
-  const save = async () => {
-    setSaving(true);
-    try {
-      const endpoint = tab === "ad-types" ? "/api/admin/ad-pricing/ad-types" : tab === "placements" ? "/api/admin/ad-pricing/placements" : "/api/admin/ad-pricing/duration-plans";
-      const method = editing ? "PATCH" : "POST";
-      const url = editing ? `${endpoint}/${editing.id}` : endpoint;
-
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+  const save = () => {
+    if (tab === "ad-types") {
+      const extra: Record<string, unknown> = {
+        descriptionHi: form.descriptionHi ?? "",
+        descriptionEn: form.descriptionEn ?? "",
+      };
+      upsertType.mutate({
+        ...(editing ? { id: editing.id } : {}),
+        code: String(form.code ?? ""),
+        nameHi: String(form.nameHi ?? ""),
+        nameEn: String(form.nameEn ?? ""),
+        basePrice: Number(form.basePrice ?? 0),
+        billingUnit: String(form.billingUnit ?? "day"),
+        isActive: form.isActive === false ? false : true,
+        sortOrder: Number(form.sortOrder ?? 0),
+        ...extra,
       });
-
-      if (res.ok) {
-        show(editing ? "अपडेट हो गया" : "जोड़ा गया");
-        setModal(false);
-        await load();
-      } else {
-        show("सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
+    } else if (tab === "placements") {
+      upsertPlacement.mutate({
+        ...(editing ? { id: editing.id } : {}),
+        code: String(form.code ?? ""),
+        nameHi: String(form.nameHi ?? ""),
+        nameEn: String(form.nameEn ?? ""),
+        multiplier: Number(form.multiplier ?? 1),
+        priority: Number(form.priority ?? 0),
+        isActive: form.isActive === false ? false : true,
+      });
+    } else {
+      upsertPlan.mutate({
+        ...(editing ? { id: editing.id } : {}),
+        days: Number(form.days ?? 1),
+        discountPercent: Number(form.discountPercent ?? 0),
+        isActive: form.isActive === false ? false : true,
+      });
     }
   };
 
@@ -186,7 +229,7 @@ export default function AdPricingPage() {
               <td className="px-3 py-3">
                 <div className="flex items-center justify-end gap-1">
                   <button type="button" onClick={() => openEdit(item)} className="grid size-8 place-items-center rounded-lg text-navy-600 transition-colors hover:bg-navy-100 hover:text-navy-900 cursor-pointer"><Icon name="pencil" size={15} /></button>
-                  <DeleteButton onConfirm={async () => { }} />
+                  <DeleteButton onConfirm={() => removeItem(item.id)} />
                 </div>
               </td>
             </tr>
@@ -224,7 +267,7 @@ export default function AdPricingPage() {
               <td className="px-3 py-3">
                 <div className="flex items-center justify-end gap-1">
                   <button type="button" onClick={() => openEdit(item)} className="grid size-8 place-items-center rounded-lg text-navy-600 transition-colors hover:bg-navy-100 hover:text-navy-900 cursor-pointer"><Icon name="pencil" size={15} /></button>
-                  <DeleteButton onConfirm={async () => { }} />
+                  <DeleteButton onConfirm={() => removeItem(item.id)} />
                 </div>
               </td>
             </tr>
@@ -256,7 +299,7 @@ export default function AdPricingPage() {
               <td className="px-3 py-3">
                 <div className="flex items-center justify-end gap-1">
                   <button type="button" onClick={() => openEdit(item)} className="grid size-8 place-items-center rounded-lg text-navy-600 transition-colors hover:bg-navy-100 hover:text-navy-900 cursor-pointer"><Icon name="pencil" size={15} /></button>
-                  <DeleteButton onConfirm={async () => { }} />
+                  <DeleteButton onConfirm={() => removeItem(item.id)} />
                 </div>
               </td>
             </tr>

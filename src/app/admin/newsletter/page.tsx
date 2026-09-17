@@ -1,13 +1,11 @@
 import { getAdmin } from "@/lib/auth";
-import { getNewsletterSubscribersCollection, getNewsletterCampaignsCollection, getNewsletterSendLogsCollection } from "@/db";
+import { getNewsletterSubscribersCollection } from "@/db";
 import { Icon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
 async function getNewsletterStats() {
   const subsCol = await getNewsletterSubscribersCollection();
-  const campsCol = await getNewsletterCampaignsCollection();
-  const logsCol = await getNewsletterSendLogsCollection();
 
   const [totalSubs, activeSubs, unsubscribedSubs, bouncedSubs] = await Promise.all([
     subsCol.countDocuments({}),
@@ -16,50 +14,17 @@ async function getNewsletterStats() {
     subsCol.countDocuments({ status: "bounced" }),
   ]);
 
-  const [totalCampaigns, sentCampaigns, scheduledCampaigns, draftCampaigns] = await Promise.all([
-    campsCol.countDocuments({}),
-    campsCol.countDocuments({ status: "sent" }),
-    campsCol.countDocuments({ status: "scheduled" }),
-    campsCol.countDocuments({ status: "draft" }),
-  ]);
-
-  const recentCampaigns = await campsCol
-    .find({})
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .toArray();
-
   const recentSubs = await subsCol
     .find({})
     .sort({ createdAt: -1 })
     .limit(10)
     .toArray();
 
-  const totalSent = await logsCol.countDocuments({ status: "sent" });
-  const totalOpened = await logsCol.countDocuments({ status: "opened" });
-  const totalClicked = await logsCol.countDocuments({ status: "clicked" });
-
   return {
     totalSubs,
     activeSubs,
     unsubscribedSubs,
     bouncedSubs,
-    totalCampaigns,
-    sentCampaigns,
-    scheduledCampaigns,
-    draftCampaigns,
-    totalSent,
-    totalOpened,
-    totalClicked,
-    recentCampaigns: recentCampaigns.map((c) => ({
-      id: c._id.toString(),
-      title: c.title,
-      subject: c.subject,
-      status: c.status,
-      sentAt: c.sentAt,
-      sentCount: c.sentCount,
-      createdAt: c.createdAt,
-    })),
     recentSubs: recentSubs.map((s) => ({
       id: s._id.toString(),
       email: s.email,
@@ -69,24 +34,6 @@ async function getNewsletterStats() {
       createdAt: s.createdAt,
     })),
   };
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    sent: "bg-leaf-100 text-leaf-800",
-    scheduled: "bg-saffron-100 text-saffron-800",
-    sending: "bg-sky-100 text-sky-800",
-    failed: "bg-rose-100 text-rose-800",
-    draft: "bg-navy-100 text-navy-700",
-    cancelled: "bg-slate-100 text-slate-700",
-  };
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-      styles[status] || "bg-slate-100 text-slate-700"
-    }`}>
-      {status}
-    </span>
-  );
 }
 
 function SubscriberBadge({ status, isVerified }: { status: string; isVerified: boolean }) {
@@ -182,46 +129,6 @@ export default async function AdminNewsletterDashboard() {
           <p className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">Bounced</p>
           <p className="mt-1 font-display text-2xl font-bold text-rose-600 tnum">{stats.bouncedSubs}</p>
         </div>
-      </div>
-
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-navy-100 bg-surface p-5 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">Total Campaigns</p>
-          <p className="mt-1 font-display text-2xl font-bold text-navy-950 tnum">{stats.totalCampaigns}</p>
-        </div>
-        <div className="rounded-xl border border-navy-100 bg-surface p-5 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">Sent</p>
-          <p className="mt-1 font-display text-2xl font-bold text-navy-600 tnum">{stats.sentCampaigns}</p>
-        </div>
-        <div className="rounded-xl border border-navy-100 bg-surface p-5 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">Scheduled</p>
-          <p className="mt-1 font-display text-2xl font-bold text-saffron-600 tnum">{stats.scheduledCampaigns}</p>
-        </div>
-        <div className="rounded-xl border border-navy-100 bg-surface p-5 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">Drafts</p>
-          <p className="mt-1 font-display text-2xl font-bold text-navy-500 tnum">{stats.draftCampaigns}</p>
-        </div>
-      </div>
-
-      <div className="mb-8">
-        <h2 className="mb-3 font-display text-lg font-bold text-navy-800">Recent Campaigns</h2>
-        {stats.recentCampaigns.length === 0 ? (
-          <p className="text-sm text-ink-soft">No campaigns yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {stats.recentCampaigns.map((c) => (
-              <div key={c.id} className="flex items-center justify-between rounded-lg border border-navy-100 bg-surface px-4 py-2.5">
-                <div>
-                  <p className="font-bold text-navy-900">{c.title || c.subject}</p>
-                  <p className="text-xs font-semibold text-ink-soft">
-                    Status: <span className="font-bold">{c.status}</span>
-                    {c.sentCount > 0 && ` • ${c.sentCount} sent`}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       <div>

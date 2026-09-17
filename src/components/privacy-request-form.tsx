@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Bi } from "@/components/bi";
 import Link from "next/link";
+import { api } from "@/trpc/react";
 
 type RequestType = "ACCESS" | "CORRECTION" | "DELETION" | "CONSENT_WITHDRAWAL" | "COMMUNICATION_PREFERENCES" | "COOKIE_REQUEST" | "PROCESSING_INFORMATION" | "PRIVACY_COMPLAINT" | "SECURITY_CONCERN" | "OTHER";
 
@@ -22,7 +23,6 @@ const REQUEST_TYPES: { value: RequestType; label: string }[] = [
 export function PrivacyRequestForm() {
   const [submitted, setSubmitted] = useState(false);
   const [requestId, setRequestId] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const [form, setForm] = useState({
@@ -39,7 +39,22 @@ export function PrivacyRequestForm() {
   const [agreed1, setAgreed1] = useState(false);
   const [agreed2, setAgreed2] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const submit = api.privacy.submit.useMutation({
+    onSuccess: (data) => {
+      if (data?.requestId) {
+        setRequestId(data.requestId);
+        setSubmitted(true);
+      } else {
+        setError("Failed to submit request");
+      }
+    },
+    onError: (err) => {
+      setError(err.message || "Failed to submit request");
+    },
+  });
+  const loading = submit.isPending;
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -48,25 +63,16 @@ export function PrivacyRequestForm() {
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await fetch("/api/privacy-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = (await res.json()) as { ok?: boolean; request?: { requestId: string }; error?: string };
-      if (res.ok && data.ok && data.request) {
-        setRequestId(data.request.requestId);
-        setSubmitted(true);
-      } else {
-        setError(data.error || "Failed to submit request");
-      }
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    submit.mutate({
+      requestType: form.requestType,
+      fullName: form.fullName,
+      email: form.email,
+      mobile: form.mobile,
+      accountId: form.accountId,
+      subject: form.subject,
+      description: form.description,
+      verificationMethod: form.verificationMethod,
+    });
   };
 
   if (submitted) {

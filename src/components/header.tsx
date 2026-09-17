@@ -7,6 +7,7 @@ import { Bi } from "@/components/bi";
 import { colorOf, Icon, LogoMark } from "@/components/icons";
 import { InstallButton } from "@/components/pwa";
 import type { CategoryWithCount } from "@/lib/data";
+import { api } from "@/trpc/react";
 
 type Suggestion = {
   id: string;
@@ -67,11 +68,11 @@ function LanguageToggle({ compact = false }: { compact?: boolean }) {
 export function SearchBox({ autoFocus = false }: { autoFocus?: boolean }) {
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [items, setItems] = useState<Suggestion[]>([]);
+  const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
   const [lang, setLang] = useState<"hi" | "en">("hi");
   const boxRef = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(null);
+  const trackClick = api.catalog.trackClick.useMutation();
 
   useEffect(() => {
     setLang(document.documentElement.dataset.lang === "en" ? "en" : "hi");
@@ -85,26 +86,37 @@ export function SearchBox({ autoFocus = false }: { autoFocus?: boolean }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const suggest = (value: string) => {
-    setQ(value);
-    if (timer.current) clearTimeout(timer.current);
-    if (value.trim().length < 2) {
-      setItems([]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 180);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const searchQuery = api.system.search.useQuery(
+    { q: debounced, limit: 6 },
+    { enabled: debounced.length >= 2 }
+  );
+
+  const items: Suggestion[] = (searchQuery.data?.services ?? []).map((s) => ({
+    id: s.id,
+    titleHi: s.titleHi,
+    titleEn: s.titleEn,
+    url: s.url,
+    categories: [],
+  }));
+
+  useEffect(() => {
+    if (debounced.length < 2) {
       setOpen(false);
       return;
     }
-    timer.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(value)}&limit=6`);
-        if (res.ok) {
-          const data = (await res.json()) as { results: Suggestion[] };
-          setItems(data.results);
-          setOpen(true);
-        }
-      } catch {
-        /* offline */
-      }
-    }, 180);
+    if ((searchQuery.data?.services?.length ?? 0) > 0) setOpen(true);
+  }, [searchQuery.data, debounced]);
+
+  const suggest = (value: string) => {
+    setQ(value);
+    if (value.trim().length < 2) {
+      setOpen(false);
+    }
   };
 
   const go = (e: React.FormEvent) => {
@@ -115,10 +127,7 @@ export function SearchBox({ autoFocus = false }: { autoFocus?: boolean }) {
 
   const openService = (s: Suggestion) => {
     try {
-      navigator.sendBeacon?.(
-        "/api/click",
-        new Blob([JSON.stringify({ serviceId: s.id })], { type: "application/json" })
-      );
+      trackClick.mutate({ serviceId: s.id });
     } catch {
       /* ignore */
     }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import { DeleteButton, EmptyRow, Field, inputCls, SortTh, Spinner, useToast } from "@/components/admin/ui";
 import { AdminTable } from "@/components/admin/table-pagination";
 import { SlidePanel } from "@/components/admin/slide-panel";
@@ -45,31 +46,45 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function AdminAdvertisementsPage() {
-  const [loading, setLoading] = useState(true);
-  const [ads, setAds] = useState<Advertisement[]>([]);
-  const [stats, setStats] = useState({ total: 0, draft: 0, submitted: 0, paymentPending: 0, paymentVerification: 0, contentReview: 0, approved: 0, scheduled: 0, live: 0, expired: 0, rejected: 0, cancelled: 0 });
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Advertisement | null>(null);
   const [form, setForm] = useState({ status: "", paymentStatus: "", adminReply: "", internalNotes: "", rejectionReason: "", assignedTo: "" });
-  const [saving, setSaving] = useState(false);
   const { show } = useToast();
+  const utils = api.useUtils();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/advertisements");
-      const data = (await res.json()) as { ads: Advertisement[]; stats: typeof stats };
-      if (res.ok) {
-        setAds(data.ads || []);
-        setStats(data.stats || stats);
-      }
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
+  const adsQuery = api.ads.adminAdvertisements.useQuery();
+  const ads = useMemo(() => (adsQuery.data ?? []) as unknown as Advertisement[], [adsQuery.data]);
+  const stats = useMemo(() => {
+    const s = { total: ads.length, draft: 0, submitted: 0, paymentPending: 0, paymentVerification: 0, contentReview: 0, approved: 0, scheduled: 0, live: 0, expired: 0, rejected: 0, cancelled: 0 };
+    for (const ad of ads) {
+      if (ad.status === "DRAFT") s.draft++;
+      else if (ad.status === "SUBMITTED") s.submitted++;
+      else if (ad.status === "PAYMENT_PENDING") s.paymentPending++;
+      else if (ad.status === "PAYMENT_VERIFICATION") s.paymentVerification++;
+      else if (ad.status === "CONTENT_REVIEW") s.contentReview++;
+      else if (ad.status === "APPROVED") s.approved++;
+      else if (ad.status === "SCHEDULED") s.scheduled++;
+      else if (ad.status === "LIVE") s.live++;
+      else if (ad.status === "EXPIRED") s.expired++;
+      else if (ad.status === "REJECTED") s.rejected++;
+      else if (ad.status === "CANCELLED") s.cancelled++;
     }
-  }, [show, stats]);
+    return s;
+  }, [ads]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (adsQuery.isError) show("लोड नहीं हो पाया", "err");
+  }, [adsQuery.isError, show]);
+
+  const updateMut = api.ads.updateAdvertisement.useMutation({
+    onSuccess: () => {
+      show("अपडेट हो गया");
+      setModal(false);
+      void utils.ads.adminAdvertisements.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const saving = updateMut.isPending;
 
   const openEdit = (ad: Advertisement) => {
     setEditing(ad);
@@ -84,30 +99,17 @@ export default function AdminAdvertisementsPage() {
     setModal(true);
   };
 
-  const save = async () => {
+  const save = () => {
     if (!editing) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/admin/advertisements/${editing.requestId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
-        show("अपडेट हो गया");
-        setModal(false);
-        await load();
-      } else {
-        show("सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
-    }
+    updateMut.mutate({
+      requestId: editing.requestId,
+      ...form,
+      status: form.status || undefined,
+      paymentStatus: form.paymentStatus || undefined,
+    });
   };
 
-  if (loading) return <Spinner />;
+  if (adsQuery.isLoading) return <Spinner />;
 
   return (
     <div>

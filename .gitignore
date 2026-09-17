@@ -16,6 +16,7 @@ src/node_modules
 
 # next.js
 /.next/
+src/.next/
 /out/
 /build
 
@@ -38,6 +39,17 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+
+# local secrets / session files (never commit)
+oc.md
+
+# local reference dump (contains its own secrets, not part of this app)
+/dummy_T3/
+
+# prisma / sqlite leftovers
+*.db
+*.sqlite
+*.sqlite-journal
 
 # vercel
 .vercel

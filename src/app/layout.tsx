@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Mukta, Rajdhani } from "next/font/google";
+import { SessionProvider } from "next-auth/react";
+import { TRPCReactProvider } from "@/trpc/react";
 import { PWABootstrap } from "@/components/pwa";
 import { CookieBanner } from "@/components/cookie-banner";
 import Script from "next/script";
@@ -55,9 +57,13 @@ export default function RootLayout({
         </Script>
       </head>
       <body className="min-h-screen font-body">
-        <PWABootstrap />
-        {children}
-        <CookieBanner />
+        <SessionProvider>
+          <TRPCReactProvider>
+            <PWABootstrap />
+            {children}
+            <CookieBanner />
+          </TRPCReactProvider>
+        </SessionProvider>
       </body>
     </html>
   );

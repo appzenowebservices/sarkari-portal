@@ -3,67 +3,75 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { CookiePreferencesModal } from "./cookie-preferences-modal";
+import { api } from "@/trpc/react";
 
 const CONSENT_KEY = "addies_cookie_consent";
 
 export function CookieBanner() {
   const [visible, setVisible] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
-  const [settings, setSettings] = useState<{
-    bannerEnabled: boolean;
-    bannerTitle: string;
-    bannerDescription: string;
-    position: string;
-    layout: string;
-    policyVersion: string;
-    policyUrl: string;
-    privacyPolicyUrl: string;
-  } | null>(null);
-  const [categories, setCategories] = useState<Array<{ code: string; name: string; required: boolean; defaultEnabled: boolean }>>([]);
+
+  const settingsQuery = api.cookie.settings.useQuery();
+  const saveConsentMutation = api.cookie.saveConsent.useMutation();
+
+  const rawSettings = settingsQuery.data?.settings as
+    | {
+        bannerEnabled?: boolean;
+        bannerTitle?: string;
+        bannerDescription?: string;
+        position?: string;
+        layout?: string;
+        policyVersion?: string;
+        policyUrl?: string;
+        privacyPolicyUrl?: string;
+      }
+    | null
+    | undefined;
+  const settings = settingsQuery.data
+    ? {
+        bannerEnabled: rawSettings?.bannerEnabled ?? true,
+        bannerTitle: rawSettings?.bannerTitle || "We use cookies to improve your experience",
+        bannerDescription:
+          rawSettings?.bannerDescription ||
+          "APPZENO Sarkari Portal uses cookies and similar technologies to provide essential website functionality, remember your preferences, improve website performance, and understand how visitors use our portal.",
+        position: rawSettings?.position ?? "bottom",
+        layout: rawSettings?.layout ?? "banner",
+        policyVersion: rawSettings?.policyVersion ?? "1.0",
+        policyUrl: rawSettings?.policyUrl || "/cookie-policy",
+        privacyPolicyUrl: rawSettings?.privacyPolicyUrl || "/privacy-policy",
+      }
+    : null;
+  const categories =
+    settingsQuery.data?.categories?.map((c) => ({
+      code: c.code,
+      name: c.name,
+      required: c.required,
+      defaultEnabled: c.defaultEnabled,
+    })) ?? [];
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/cookies/settings");
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          settings?: typeof settings;
-          categories?: Array<{ code: string; name: string; required: boolean; defaultEnabled: boolean }>;
-        };
-        if (cancelled) return;
-        if (data.settings?.bannerEnabled !== false) {
-          setSettings(data.settings || null);
-          setCategories(data.categories || []);
-          const hasConsent = document.cookie.includes(`${CONSENT_KEY}=`);
-          if (!hasConsent) setVisible(true);
-        }
-      } catch {
-        // ignore
-      }
+    if (!settingsQuery.data) return;
+    const s = settingsQuery.data.settings as { bannerEnabled?: boolean } | null;
+    if (s?.bannerEnabled !== false) {
+      const hasConsent = document.cookie.includes(`${CONSENT_KEY}=`);
+      if (!hasConsent) setVisible(true);
     }
-    load();
-    return () => { cancelled = true; };
-  }, []);
+  }, [settingsQuery.data]);
 
-  const saveConsent = async (preferences: Record<string, boolean>, status: string) => {
+  const saveConsent = (preferences: Record<string, boolean>, status: string) => {
     try {
-      await fetch("/api/cookies/consent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          anonymousId: getAnonymousId(),
-          sessionId: getSessionId(),
-          consentStatus: status,
-          preferences,
-          policyVersion: settings?.policyVersion || "1.0",
-          consentMethod: "cookie_banner",
-          ipHash: "",
-          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-          deviceType: getDeviceType(),
-          browser: getBrowser(),
-          os: getOS(),
-        }),
+      saveConsentMutation.mutate({
+        anonymousId: getAnonymousId(),
+        sessionId: getSessionId(),
+        consentStatus: status,
+        preferences,
+        policyVersion: settings?.policyVersion || "1.0",
+        consentMethod: "cookie_banner",
+        ipHash: "",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        deviceType: getDeviceType(),
+        browser: getBrowser(),
+        os: getOS(),
       });
     } catch {
       // ignore

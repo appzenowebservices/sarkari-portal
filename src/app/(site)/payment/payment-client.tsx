@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Bi } from "@/components/bi";
 import { Icon } from "@/components/icons";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { api } from "@/trpc/react";
 
 type Advertisement = {
   id: string;
@@ -18,16 +19,34 @@ type Advertisement = {
 export default function PaymentClient() {
   const searchParams = useSearchParams();
   const requestId = searchParams.get("requestId");
-  const [ad, setAd] = useState<Advertisement | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+
+  const adQuery = api.ads.advertisementStatus.useQuery(
+    { requestId: requestId ?? "" },
+    { enabled: !!requestId }
+  );
+  const pricingQuery = api.ads.adPricing.useQuery();
+  const paymentSettingsQuery = api.payment.settings.useQuery();
+  const uploadProof = api.payment.uploadProof.useMutation();
+
+  const ad = adQuery.data ?? null;
+  const paymentSettings = paymentSettingsQuery.data ?? null;
+  const loading = (!!requestId && adQuery.isLoading) || paymentSettingsQuery.isLoading || pricingQuery.isLoading;
+  const loadError = !requestId
+    ? "Request ID is required"
+    : adQuery.error
+      ? adQuery.error.message || "Advertisement not found"
+      : !adQuery.isLoading && !ad
+        ? "Advertisement not found"
+        : "";
+  const [submitError, setSubmitError] = useState("");
+  const error = loadError || submitError;
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ utrNumber: "", paymentDate: "", paymentTime: "", screenshot: "" });
-  const [paymentSettings, setPaymentSettings] = useState<{ upiEnabled: boolean; upiId: string; payeeName: string; merchantName: string; gstPercent: number; whatsappNumber: string } | null>(null);
   const [qrError, setQrError] = useState(false);
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
   const [fileError, setFileError] = useState("");
+  void pricingQuery.data;
 
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -95,71 +114,26 @@ export default function PaymentClient() {
     }
   };
 
-  useEffect(() => {
-    async function load() {
-      if (!requestId) {
-        setError("Request ID is required");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const [adRes, settingsRes] = await Promise.all([
-          fetch(`/api/advertise/status?requestId=${encodeURIComponent(requestId)}`),
-          fetch("/api/public/ad-pricing"),
-        ]);
-
-        const adData = await adRes.json();
-        const settingsData = await settingsRes.json();
-
-        if (adRes.ok && adData.advertisement) {
-          setAd(adData.advertisement);
-        } else {
-          setError(adData.error || "Advertisement not found");
-        }
-
-        if (settingsRes.ok) {
-          const ps = settingsData.paymentSettings || {};
-          setPaymentSettings({
-            upiEnabled: ps.upiEnabled || false,
-            upiId: ps.upiId || "",
-            payeeName: ps.payeeName || "",
-            merchantName: ps.merchantName || "",
-            gstPercent: ps.gstPercent || 0,
-            whatsappNumber: ps.whatsappNumber || "",
-          });
-        } else {
-          console.error("Failed to load payment settings:", settingsData);
-        }
-      } catch {
-        setError("Failed to load payment details");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void load();
-  }, [requestId]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    setSubmitError("");
     setSubmitting(true);
 
     try {
-      const res = await fetch("/api/payment/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, ...form }),
+      const data = await uploadProof.mutateAsync({
+        requestId: requestId ?? "",
+        amount: ad?.totalAmount ?? 0,
+        method: "UPI",
+        utrNumber: form.utrNumber,
+        screenshot: form.screenshot,
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
+      if (data.ok) {
         window.location.href = `/payment/success?requestId=${requestId}`;
       } else {
-        setError(data.error || "Failed to upload payment proof");
+        setSubmitError("Failed to upload payment proof");
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setSubmitError(err instanceof Error && err.message ? err.message : "Failed to upload payment proof");
     } finally {
       setSubmitting(false);
     }

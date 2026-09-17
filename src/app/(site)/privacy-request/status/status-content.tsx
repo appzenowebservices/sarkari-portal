@@ -1,9 +1,9 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
 import { Bi } from "@/components/bi";
 import { TrackingTimeline } from "@/components/tracking-timeline";
+import { api } from "@/trpc/react";
 
 type PrivacyRequest = {
   id: string;
@@ -37,7 +37,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> =
   CLOSED: { label: "Closed", color: "text-slate-800", bg: "bg-slate-100" },
 };
 
-function formatDate(date: string | null) {
+function formatDate(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleDateString("en-IN", {
     weekday: "short",
@@ -47,7 +47,7 @@ function formatDate(date: string | null) {
   });
 }
 
-function formatTime(date: string | null) {
+function formatTime(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -82,37 +82,25 @@ function getFinalStatus(status: string): "completed" | "active" | "upcoming" | "
 export function PrivacyRequestStatusContent() {
   const searchParams = useSearchParams();
   const requestId = searchParams.get("requestId");
-  const [loading, setLoading] = useState(true);
-  const [request, setRequest] = useState<PrivacyRequest | null>(null);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function load() {
-      if (!requestId) {
-        setError("Request ID is required");
-        setLoading(false);
-        return;
-      }
+  const {
+    data: request,
+    isLoading: loading,
+    error: queryError,
+  } = api.privacy.status.useQuery(
+    { requestId: requestId ?? "" },
+    { enabled: !!requestId }
+  );
 
-      try {
-        const res = await fetch(`/api/privacy-request/status?requestId=${encodeURIComponent(requestId)}`);
-        const data = (await res.json()) as { request?: PrivacyRequest; error?: string };
-        if (res.ok && data.request) {
-          setRequest(data.request);
-        } else {
-          setError(data.error || "Request not found");
-        }
-      } catch {
-        setError("Failed to load request status");
-      } finally {
-        setLoading(false);
-      }
-    }
+  const error = !requestId
+    ? "Request ID is required"
+    : queryError
+      ? queryError.message || "Failed to load request status"
+      : !loading && !request
+        ? "Request not found"
+        : "";
 
-    void load();
-  }, [requestId]);
-
-  const getSteps = (req: PrivacyRequest) => {
+  const getSteps = (req: NonNullable<typeof request>) => {
     const submitted = formatDate(req.submittedAt);
     const submittedTime = formatTime(req.submittedAt);
     const verified = formatDate(req.verifiedAt);

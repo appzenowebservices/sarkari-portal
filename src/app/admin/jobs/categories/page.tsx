@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -40,8 +41,6 @@ const EMPTY_FORM = {
 };
 
 export default function AdminJobCategoriesPage() {
-  const [list, setList] = useState<Cat[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Cat | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -49,6 +48,33 @@ export default function AdminJobCategoriesPage() {
   const [sortCol, setSortCol] = useState<string | null>("sortOrder");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { toast, show, node } = useToast();
+
+  const utils = api.useUtils();
+  const catsQuery = api.jobTaxonomy.categories.useQuery();
+  const loading = catsQuery.isLoading;
+
+  const upsertCat = api.jobTaxonomy.upsertCategory.useMutation({
+    onSuccess: () => utils.jobTaxonomy.categories.invalidate(),
+  });
+  const deleteCat = api.jobTaxonomy.deleteCategory.useMutation({
+    onSuccess: () => utils.jobTaxonomy.categories.invalidate(),
+  });
+
+  const list: Cat[] = useMemo(() => {
+    const rows = catsQuery.data ?? [];
+    return rows.map((c) => ({
+      id: c.id,
+      slug: c.slug ?? "",
+      titleHi: c.titleHi ?? "",
+      titleEn: c.titleEn ?? "",
+      descriptionHi: c.descriptionHi ?? "",
+      descriptionEn: c.descriptionEn ?? "",
+      icon: (c as { icon?: string }).icon ?? "dots",
+      color: (c as { color?: string }).color ?? "navy",
+      sortOrder: c.sortOrder ?? 0,
+      isActive: (c as { isActive?: boolean }).isActive ?? true,
+    }));
+  }, [catsQuery.data]);
 
   const handleSort = (col: string) => {
     if (sortCol === col) {
@@ -75,23 +101,6 @@ export default function AdminJobCategoriesPage() {
       return ((av as number) - (bv as number)) * dir;
     });
   }, [list, sortCol, sortDir]);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/jobs/categories");
-      const data = (await res.json()) as { categories: Cat[] };
-      setList(data.categories);
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const openNew = () => {
     setEditing(null);
@@ -121,24 +130,13 @@ export default function AdminJobCategoriesPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(
-        editing ? `/api/admin/jobs/categories/${editing.id}` : "/api/admin/jobs/categories",
-        {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
+      await upsertCat.mutateAsync(
+        editing ? { id: editing.id, ...form } : { ...form },
       );
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
-        setModal(false);
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
+      setModal(false);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -146,22 +144,20 @@ export default function AdminJobCategoriesPage() {
 
   const remove = async (c: Cat) => {
     if (!window.confirm(`"${c.titleHi}" श्रेणी हटाना है?`)) return;
-    const res = await fetch(`/api/admin/jobs/categories/${c.id}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await deleteCat.mutateAsync({ id: c.id });
       show("श्रेणी हटा दी गई");
-      await load();
-    } else {
+    } catch {
       show("हटाने में विफल", "err");
     }
   };
 
   const toggleActive = async (c: Cat) => {
-    const res = await fetch(`/api/admin/jobs/categories/${c.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !c.isActive }),
-    });
-    if (res.ok) await load();
+    try {
+      await upsertCat.mutateAsync({ id: c.id, isActive: !c.isActive });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   return (

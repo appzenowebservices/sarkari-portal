@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Bi } from "@/components/bi";
 import Link from "next/link";
+import { api } from "@/trpc/react";
 
 const REQUEST_TYPES = [
   { value: "GOVERNMENT_JOB", label: "Government Job" },
@@ -23,7 +24,6 @@ const REQUEST_TYPES = [
 export function ContactForm() {
   const [submitted, setSubmitted] = useState(false);
   const [ticketId, setTicketId] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [trackingId, setTrackingId] = useState("");
 
@@ -36,7 +36,22 @@ export function ContactForm() {
     agreed: false,
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const submit = api.contact.submit.useMutation({
+    onSuccess: (data) => {
+      if (data?.ticket) {
+        setTicketId(data.ticket.ticketId);
+        setSubmitted(true);
+      } else {
+        setError("Failed to submit request");
+      }
+    },
+    onError: (err) => {
+      setError(err.message || "Failed to submit request");
+    },
+  });
+  const loading = submit.isPending;
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -45,25 +60,14 @@ export function ContactForm() {
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await fetch("/api/contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = (await res.json()) as { ok?: boolean; ticket?: { ticketId: string }; error?: string };
-      if (res.ok && data.ok && data.ticket) {
-        setTicketId(data.ticket.ticketId);
-        setSubmitted(true);
-      } else {
-        setError(data.error || "Failed to submit request");
-      }
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    submit.mutate({
+      fullName: form.fullName,
+      email: form.email,
+      requestType: form.requestType,
+      subject: form.subject,
+      message: form.message,
+      agreed: true as const,
+    });
   };
 
   if (submitted) {

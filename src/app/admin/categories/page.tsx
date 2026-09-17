@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -50,9 +51,17 @@ const EMPTY_FORM = {
   isActive: true,
 };
 
+function slugify(s: string) {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 80);
+}
+
 export default function AdminCategoriesPage() {
-  const [list, setList] = useState<Cat[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Cat | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -60,6 +69,61 @@ export default function AdminCategoriesPage() {
   const [sortCol, setSortCol] = useState<string | null>("titleEn");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { toast, show, node } = useToast();
+
+  const utils = api.useUtils();
+  const catsQuery = api.catalog.adminCategories.useQuery();
+  const servicesQuery = api.catalog.adminServices.useQuery({ page: 1, limit: 500 });
+  const loading = catsQuery.isLoading || servicesQuery.isLoading;
+
+  const upsertCat = api.catalog.upsertCategory.useMutation({
+    onSuccess: () => {
+      utils.catalog.adminCategories.invalidate();
+      utils.catalog.categories.invalidate();
+    },
+  });
+  const deleteCat = api.catalog.deleteCategory.useMutation({
+    onSuccess: () => {
+      utils.catalog.adminCategories.invalidate();
+      utils.catalog.categories.invalidate();
+    },
+  });
+  const reorderCats = api.catalog.reorderCategories.useMutation({
+    onSuccess: () => {
+      utils.catalog.adminCategories.invalidate();
+      utils.catalog.categories.invalidate();
+    },
+  });
+
+  const list: Cat[] = useMemo(() => {
+    const cats = catsQuery.data ?? [];
+    const services = servicesQuery.data?.services ?? [];
+    const counts = new Map<string, number>();
+    for (const s of services) {
+      for (const id of s.categoryIds ?? []) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return cats.map((c) => ({
+      id: c.id,
+      slug: c.slug ?? "",
+      titleHi: c.titleHi ?? "",
+      titleEn: c.titleEn ?? "",
+      descriptionHi: c.descriptionHi ?? "",
+      descriptionEn: c.descriptionEn ?? "",
+      icon: c.icon ?? "dots",
+      color: c.color ?? "navy",
+      sortOrder: c.sortOrder ?? 0,
+      isActive: c.isActive ?? true,
+      serviceCount: counts.get(c.id) ?? 0,
+      seoTitle: (c as { seoTitle?: string }).seoTitle ?? "",
+      metaDescription: (c as { metaDescription?: string }).metaDescription ?? "",
+      focusKeyword: (c as { focusKeyword?: string }).focusKeyword ?? "",
+      ogTitle: (c as { ogTitle?: string }).ogTitle ?? "",
+      ogDescription: (c as { ogDescription?: string }).ogDescription ?? "",
+      ogImage: (c as { ogImage?: string }).ogImage ?? "",
+      canonicalUrl: (c as { canonicalUrl?: string }).canonicalUrl ?? "",
+      robots: (c as { robots?: string }).robots ?? "",
+      schemaType: (c as { schemaType?: string }).schemaType ?? "",
+    }));
+  }, [catsQuery.data, servicesQuery.data]);
 
   const { translateAndSync } = useTranslate();
 
@@ -91,28 +155,6 @@ export default function AdminCategoriesPage() {
     });
   }, [list, sortCol, sortDir]);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/categories");
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Categories API error: ${res.status}`);
-      }
-      const data = (await res.json()) as { categories: Cat[] };
-      setList(data.categories ?? []);
-    } catch (err) {
-      console.error("Failed to load categories:", err);
-      show("श्रेणियां नहीं मिलीं", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const openNew = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
@@ -141,24 +183,14 @@ export default function AdminCategoriesPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(
-        editing ? `/api/admin/categories/${editing.id}` : "/api/admin/categories",
-        {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
+      const slug = form.slug.trim() || slugify(form.titleEn) || `cat-${Date.now()}`;
+      await upsertCat.mutateAsync(
+        editing ? { id: editing.id, ...form, slug } : { ...form, slug },
       );
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
-        setModal(false);
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
+      setModal(false);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -171,26 +203,17 @@ export default function AdminCategoriesPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(
-        editing ? `/api/admin/categories/${editing.id}` : "/api/admin/categories",
-        {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
+      const slug = form.slug.trim() || slugify(form.titleEn) || `cat-${Date.now()}`;
+      await upsertCat.mutateAsync(
+        editing ? { id: editing.id, ...form, slug } : { ...form, slug },
       );
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
-        setEditing(null);
-        setForm(EMPTY_FORM);
-        const slugInput = document.querySelector('input[placeholder="khali chhodne par auto banega"]') as HTMLInputElement | null;
-        slugInput?.focus();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show(editing ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
+      setEditing(null);
+      setForm(EMPTY_FORM);
+      const slugInput = document.querySelector('input[placeholder="khali chhodne par auto banega"]') as HTMLInputElement | null;
+      slugInput?.focus();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -198,22 +221,20 @@ export default function AdminCategoriesPage() {
 
   const remove = async (c: Cat) => {
     if (!window.confirm(`"${c.titleHi}" श्रेणी हटाना है? सभी लिंक भी हट जाएंगे`)) return;
-    const res = await fetch(`/api/admin/categories/${c.id}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await deleteCat.mutateAsync({ id: c.id });
       show("श्रेणी हटा दी गई (सभी लिंक भी हट गए)");
-      await load();
-    } else {
+    } catch {
       show("हटाने में विफल", "err");
     }
   };
 
   const toggleActive = async (c: Cat) => {
-    const res = await fetch(`/api/admin/categories/${c.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !c.isActive }),
-    });
-    if (res.ok) await load();
+    try {
+      await upsertCat.mutateAsync({ id: c.id, slug: c.slug, isActive: !c.isActive });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   const move = async (index: number, dir: -1 | 1) => {
@@ -221,13 +242,13 @@ export default function AdminCategoriesPage() {
     if (target < 0 || target >= list.length) return;
     const next = [...list];
     const [item] = next.splice(index, 1);
+    if (!item) return;
     next.splice(target, 0, item);
-    setList(next);
-    await fetch("/api/admin/categories/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: next.map((c) => c.id) }),
-    });
+    try {
+      await reorderCats.mutateAsync({ ids: next.map((c) => c.id) });
+    } catch {
+      show("क्रम सहेज नहीं पाया", "err");
+    }
   };
 
   return (

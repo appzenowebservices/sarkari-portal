@@ -51,21 +51,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   whatsapp: "",
 };
 
-function logDbFallback(fnName: string, err: unknown): void {
-  const msg = err instanceof Error ? err.message : String(err);
-  const isConn =
-    msg.includes("querySrv") ||
-    msg.includes("ECONNREFUSED") ||
-    msg.includes("MONGODB_URI") ||
-    msg.includes("MongoServerSelectionError") ||
-    (err as { code?: string })?.code === "ECONNREFUSED";
-  if (isConn) {
-    console.warn(`[data] ${fnName} fallback (DB unavailable): ${msg.split("\n")[0].slice(0, 200)}`);
-  } else {
-    console.error(`[data] ${fnName} error:`, err);
-  }
-}
-
 function toId(id: ObjectId): string {
   return id.toString();
 }
@@ -91,72 +76,62 @@ function serviceCategoryQuery(categoryId: ObjectId | string): Record<string, unk
 }
 
 export async function getSettings(): Promise<Record<string, string>> {
-  try {
-    const settings = await getSettingsCollection();
-    const rows = await settings.find({}).toArray();
-    const map: Record<string, string> = { ...DEFAULT_SETTINGS };
-    for (const r of rows) map[r.key] = r.value;
-    return map;
-  } catch (err) {
-    logDbFallback("getSettings", err);
-    return { ...DEFAULT_SETTINGS };
-  }
+  const settings = await getSettingsCollection();
+  const rows = await settings.find({}).toArray();
+  const map: Record<string, string> = { ...DEFAULT_SETTINGS };
+  for (const r of rows) map[r.key] = r.value;
+  return map;
 }
 
 export async function getCategories(
   opts: { includeInactive?: boolean; alphabetical?: boolean } = {}
 ): Promise<CategoryWithCount[]> {
-  try {
-    const categories = await getCategoriesCollection();
-    const services = await getServicesCollection();
+  const categories = await getCategoriesCollection();
+  const services = await getServicesCollection();
 
-    const sort = opts.alphabetical
-      ? ({ titleEn: 1 } as Record<string, 1 | -1>)
-      : ({ sortOrder: 1, _id: 1 } as Record<string, 1 | -1>);
-    const cats = await categories.find({}).sort(sort).toArray();
+  const sort = opts.alphabetical
+    ? ({ titleEn: 1 } as Record<string, 1 | -1>)
+    : ({ sortOrder: 1, _id: 1 } as Record<string, 1 | -1>);
+  const cats = await categories.find({}).sort(sort).toArray();
 
-    const results: CategoryWithCount[] = [];
-    for (const cat of cats) {
-      const catQuery = serviceCategoryQuery(cat._id);
-      const activeCount = await services.countDocuments({
-        ...catQuery,
-        isActive: true,
-      });
-      const totalCount = await services.countDocuments(catQuery);
-      const serviceCount = opts.includeInactive ? totalCount : activeCount;
-      results.push({
-        id: toId(cat._id),
-        slug: cat.slug,
-        titleHi: cat.titleHi,
-        titleEn: cat.titleEn,
-        descriptionHi: cat.descriptionHi,
-        descriptionEn: cat.descriptionEn,
-        icon: cat.icon,
-        color: cat.color,
-        sortOrder: cat.sortOrder,
-        isActive: cat.isActive,
-        seoTitle: cat.seoTitle,
-        metaDescription: cat.metaDescription,
-        focusKeyword: cat.focusKeyword,
-        ogTitle: cat.ogTitle,
-        ogDescription: cat.ogDescription,
-        ogImage: cat.ogImage,
-        canonicalUrl: cat.canonicalUrl,
-        robots: cat.robots,
-        schemaType: cat.schemaType,
-        createdAt: cat.createdAt,
-        serviceCount,
-      });
-    }
-
-    if (!opts.includeInactive) {
-      return results.filter((r) => r.isActive);
-    }
-    return results;
-  } catch (err) {
-    logDbFallback("getCategories", err);
-    return [];
+  const results: CategoryWithCount[] = [];
+  for (const cat of cats) {
+    const catQuery = serviceCategoryQuery(cat._id);
+    const activeCount = await services.countDocuments({
+      ...catQuery,
+      isActive: true,
+    });
+    const totalCount = await services.countDocuments(catQuery);
+    const serviceCount = opts.includeInactive ? totalCount : activeCount;
+    results.push({
+      id: toId(cat._id),
+      slug: cat.slug,
+      titleHi: cat.titleHi,
+      titleEn: cat.titleEn,
+      descriptionHi: cat.descriptionHi,
+      descriptionEn: cat.descriptionEn,
+      icon: cat.icon,
+      color: cat.color,
+      sortOrder: cat.sortOrder,
+      isActive: cat.isActive,
+      seoTitle: cat.seoTitle,
+      metaDescription: cat.metaDescription,
+      focusKeyword: cat.focusKeyword,
+      ogTitle: cat.ogTitle,
+      ogDescription: cat.ogDescription,
+      ogImage: cat.ogImage,
+      canonicalUrl: cat.canonicalUrl,
+      robots: cat.robots,
+      schemaType: cat.schemaType,
+      createdAt: cat.createdAt,
+      serviceCount,
+    });
   }
+
+  if (!opts.includeInactive) {
+    return results.filter((r) => r.isActive);
+  }
+  return results;
 }
 
 export async function getServicesForCategory(slug: string) {
@@ -210,170 +185,155 @@ export async function getServicesForCategory(slug: string) {
 }
 
 export async function getPopular(limit = 6, dateRange?: { from: Date; to: Date }) {
-  try {
-    const categories = await getCategoriesCollection();
-    const services = await getServicesCollection();
+  const categories = await getCategoriesCollection();
+  const services = await getServicesCollection();
 
-    const filter: Record<string, unknown> = { isActive: true };
-    if (dateRange) {
-      filter.createdAt = { $gte: dateRange.from, $lte: dateRange.to };
-    }
-
-    const rows = await services
-      .find(filter)
-      .sort({ clickCount: -1, createdAt: -1 })
-      .limit(limit)
-      .toArray();
-
-    const results: ServiceWithCategory[] = [];
-    for (const svc of rows) {
-      const catIds = getServiceCategoryIds(svc).map(toId);
-      const cats = await categories.find({ _id: { $in: catIds.map((id) => new ObjectId(id)) } }).toArray();
-      if (!cats.length) continue;
-      results.push({
-        id: toId(svc._id),
-        categoryIds: getServiceCategoryIds(svc).map(toId),
-        titleHi: svc.titleHi,
-        titleEn: svc.titleEn,
-        url: svc.url,
-        descriptionHi: svc.descriptionHi,
-        descriptionEn: svc.descriptionEn,
-        tags: svc.tags,
-        isFeatured: svc.isFeatured,
-        isNew: svc.isNew,
-        isActive: svc.isActive,
-        sortOrder: svc.sortOrder,
-        clickCount: svc.clickCount,
-        createdAt: svc.createdAt,
-        categories: cats.map((c) => ({
-          slug: c.slug,
-          titleHi: c.titleHi,
-          titleEn: c.titleEn,
-          color: c.color,
-          icon: c.icon,
-        })),
-      });
-    }
-    return results;
-  } catch (err) {
-    logDbFallback("getPopular", err);
-    return [];
+  const filter: Record<string, unknown> = { isActive: true };
+  if (dateRange) {
+    filter.createdAt = { $gte: dateRange.from, $lte: dateRange.to };
   }
+
+  const rows = await services
+    .find(filter)
+    .sort({ clickCount: -1, createdAt: -1 })
+    .limit(limit)
+    .toArray();
+
+  const results: ServiceWithCategory[] = [];
+  for (const svc of rows) {
+    const catIds = getServiceCategoryIds(svc).map(toId);
+    const cats = await categories.find({ _id: { $in: catIds.map((id) => new ObjectId(id)) } }).toArray();
+    if (!cats.length) continue;
+    results.push({
+      id: toId(svc._id),
+      categoryIds: getServiceCategoryIds(svc).map(toId),
+      titleHi: svc.titleHi,
+      titleEn: svc.titleEn,
+      url: svc.url,
+      descriptionHi: svc.descriptionHi,
+      descriptionEn: svc.descriptionEn,
+      tags: svc.tags,
+      isFeatured: svc.isFeatured,
+      isNew: svc.isNew,
+      isActive: svc.isActive,
+      sortOrder: svc.sortOrder,
+      clickCount: svc.clickCount,
+      createdAt: svc.createdAt,
+      categories: cats.map((c) => ({
+        slug: c.slug,
+        titleHi: c.titleHi,
+        titleEn: c.titleEn,
+        color: c.color,
+        icon: c.icon,
+      })),
+    });
+  }
+  return results;
 }
 
 export async function getFreshServices(limit = 8, dateRange?: { from: Date; to: Date }) {
-  try {
-    const categories = await getCategoriesCollection();
-    const services = await getServicesCollection();
+  const categories = await getCategoriesCollection();
+  const services = await getServicesCollection();
 
-    const filter: Record<string, unknown> = { isActive: true, isNew: true };
-    if (dateRange) {
-      filter.createdAt = { $gte: dateRange.from, $lte: dateRange.to };
-    }
-
-    const rows = await services
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .toArray();
-
-    const results: ServiceWithCategory[] = [];
-    for (const svc of rows) {
-      const catIds = getServiceCategoryIds(svc).map(toId);
-      const cats = await categories.find({ _id: { $in: catIds.map((id) => new ObjectId(id)) } }).toArray();
-      if (!cats.length) continue;
-      results.push({
-        id: toId(svc._id),
-        categoryIds: getServiceCategoryIds(svc).map(toId),
-        titleHi: svc.titleHi,
-        titleEn: svc.titleEn,
-        url: svc.url,
-        descriptionHi: svc.descriptionHi,
-        descriptionEn: svc.descriptionEn,
-        tags: svc.tags,
-        isFeatured: svc.isFeatured,
-        isNew: svc.isNew,
-        isActive: svc.isActive,
-        sortOrder: svc.sortOrder,
-        clickCount: svc.clickCount,
-        createdAt: svc.createdAt,
-        categories: cats.map((c) => ({
-          slug: c.slug,
-          titleHi: c.titleHi,
-          titleEn: c.titleEn,
-          color: c.color,
-          icon: c.icon,
-        })),
-      });
-    }
-    return results;
-  } catch (err) {
-    logDbFallback("getFreshServices", err);
-    return [];
+  const filter: Record<string, unknown> = { isActive: true, isNew: true };
+  if (dateRange) {
+    filter.createdAt = { $gte: dateRange.from, $lte: dateRange.to };
   }
+
+  const rows = await services
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+
+  const results: ServiceWithCategory[] = [];
+  for (const svc of rows) {
+    const catIds = getServiceCategoryIds(svc).map(toId);
+    const cats = await categories.find({ _id: { $in: catIds.map((id) => new ObjectId(id)) } }).toArray();
+    if (!cats.length) continue;
+    results.push({
+      id: toId(svc._id),
+      categoryIds: getServiceCategoryIds(svc).map(toId),
+      titleHi: svc.titleHi,
+      titleEn: svc.titleEn,
+      url: svc.url,
+      descriptionHi: svc.descriptionHi,
+      descriptionEn: svc.descriptionEn,
+      tags: svc.tags,
+      isFeatured: svc.isFeatured,
+      isNew: svc.isNew,
+      isActive: svc.isActive,
+      sortOrder: svc.sortOrder,
+      clickCount: svc.clickCount,
+      createdAt: svc.createdAt,
+      categories: cats.map((c) => ({
+        slug: c.slug,
+        titleHi: c.titleHi,
+        titleEn: c.titleEn,
+        color: c.color,
+        icon: c.icon,
+      })),
+    });
+  }
+  return results;
 }
 
 export async function getServicesByCategory(limit = 6, alphabetical = false): Promise<Record<string, ServiceWithCategory[]>> {
-  try {
-    const categories = await getCategoriesCollection();
-    const services = await getServicesCollection();
+  const categories = await getCategoriesCollection();
+  const services = await getServicesCollection();
 
-    const catSort = alphabetical
-      ? ({ titleEn: 1 } as Record<string, 1 | -1>)
-      : ({ sortOrder: 1, _id: 1 } as Record<string, 1 | -1>);
-    const cats = await categories.find({ isActive: true }).sort(catSort).toArray();
-    const map: Record<string, ServiceWithCategory[]> = {};
+  const catSort = alphabetical
+    ? ({ titleEn: 1 } as Record<string, 1 | -1>)
+    : ({ sortOrder: 1, _id: 1 } as Record<string, 1 | -1>);
+  const cats = await categories.find({ isActive: true }).sort(catSort).toArray();
+  const map: Record<string, ServiceWithCategory[]> = {};
 
-    for (const cat of cats) {
-      const rows = await services
-        .find({ ...serviceCategoryQuery(cat._id), isActive: true })
-        .sort({ sortOrder: 1, clickCount: -1, _id: 1 })
-        .limit(limit)
-        .toArray();
+  for (const cat of cats) {
+    const rows = await services
+      .find({ ...serviceCategoryQuery(cat._id), isActive: true })
+      .sort({ sortOrder: 1, clickCount: -1, _id: 1 })
+      .limit(limit)
+      .toArray();
 
-      const catIds = rows.flatMap((r) => getServiceCategoryIds(r).map(toId));
-      const uniqueCatIds = Array.from(new Set(catIds));
-      const matchedCats = uniqueCatIds.length
-        ? await categories.find({ _id: { $in: uniqueCatIds.map((id) => new ObjectId(id)) } }).toArray()
-        : [];
-      const catMap = new Map(matchedCats.map((c) => [toId(c._id), c]));
+    const catIds = rows.flatMap((r) => getServiceCategoryIds(r).map(toId));
+    const uniqueCatIds = Array.from(new Set(catIds));
+    const matchedCats = uniqueCatIds.length
+      ? await categories.find({ _id: { $in: uniqueCatIds.map((id) => new ObjectId(id)) } }).toArray()
+      : [];
+    const catMap = new Map(matchedCats.map((c) => [toId(c._id), c]));
 
-      map[cat.slug] = rows.map((r) => ({
-        id: toId(r._id),
-        categoryIds: getServiceCategoryIds(r).map(toId),
-        titleHi: r.titleHi,
-        titleEn: r.titleEn,
-        url: r.url,
-        descriptionHi: r.descriptionHi,
-        descriptionEn: r.descriptionEn,
-        tags: r.tags,
-        isFeatured: r.isFeatured,
-        isNew: r.isNew,
-        isActive: r.isActive,
-        sortOrder: r.sortOrder,
-        clickCount: r.clickCount,
-        createdAt: r.createdAt,
-        categories: getServiceCategoryIds(r)
-          .map((id) => {
-            const c = catMap.get(toId(id));
-            if (!c) return null;
-            return {
-              slug: c.slug,
-              titleHi: c.titleHi,
-              titleEn: c.titleEn,
-              color: c.color,
-              icon: c.icon,
-            };
-          })
-          .filter((c): c is NonNullable<typeof c> => c !== null),
-      })) as ServiceWithCategory[];
-    }
-
-    return map;
-  } catch (err) {
-    logDbFallback("getServicesByCategory", err);
-    return {};
+    map[cat.slug] = rows.map((r) => ({
+      id: toId(r._id),
+      categoryIds: getServiceCategoryIds(r).map(toId),
+      titleHi: r.titleHi,
+      titleEn: r.titleEn,
+      url: r.url,
+      descriptionHi: r.descriptionHi,
+      descriptionEn: r.descriptionEn,
+      tags: r.tags,
+      isFeatured: r.isFeatured,
+      isNew: r.isNew,
+      isActive: r.isActive,
+      sortOrder: r.sortOrder,
+      clickCount: r.clickCount,
+      createdAt: r.createdAt,
+      categories: getServiceCategoryIds(r)
+        .map((id) => {
+          const c = catMap.get(toId(id));
+          if (!c) return null;
+          return {
+            slug: c.slug,
+            titleHi: c.titleHi,
+            titleEn: c.titleEn,
+            color: c.color,
+            icon: c.icon,
+          };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null),
+    })) as ServiceWithCategory[];
   }
+
+  return map;
 }
 
 export async function getFeatured(limit = 4) {
@@ -469,82 +429,67 @@ export async function searchServices(q: string, limit = 12) {
 }
 
 export async function getTotalClicks(): Promise<number> {
-  try {
-    const services = await getServicesCollection();
-    const result = await services
-      .aggregate([
-        {
-          $group: {
-            _id: null,
-            total: { $sum: "$clickCount" },
-          },
+  const services = await getServicesCollection();
+  const result = await services
+    .aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$clickCount" },
         },
-      ])
-      .toArray();
-    return result[0]?.total ?? 0;
-  } catch (err) {
-    logDbFallback("getTotalClicks", err);
-    return 0;
-  }
+      },
+    ])
+    .toArray();
+  return result[0]?.total ?? 0;
 }
 
 /* =================== ADS =================== */
 
 export async function getAdsForPlacement(placement: string): Promise<Ad[]> {
-  try {
-    const ads = await getAdsCollection();
-    const now = new Date();
-    const rows = await ads
-      .find({
-        isPublished: true,
-        placement,
-        $or: [
-          { publishAt: { $lte: now } },
-          { publishAt: { $exists: false } },
-          { expiresAt: { $gte: now } },
-          { expiresAt: { $exists: false } },
-        ],
-      })
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .toArray();
+  const ads = await getAdsCollection();
+  const now = new Date();
+  const rows = await ads
+    .find({
+      isPublished: true,
+      placement,
+      $or: [
+        { publishAt: { $lte: now } },
+        { publishAt: { $exists: false } },
+        { expiresAt: { $gte: now } },
+        { expiresAt: { $exists: false } },
+      ],
+    })
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .toArray();
 
-    return rows.map((r) => ({
-      ...r,
-      id: toId(r._id),
-    })) as Ad[];
-  } catch (err) {
-    logDbFallback("getAdsForPlacement", err);
-    return [];
-  }
+  return rows.map((r) => ({
+    ...r,
+    id: toId(r._id),
+  })) as Ad[];
 }
 
 export async function getAllLiveAds(): Promise<Record<string, Ad[]>> {
-  try {
-    const ads = await getAdsCollection();
-    const now = new Date();
-    const rows = await ads
-      .find({
-        isPublished: true,
-        $or: [
-          { publishAt: { $lte: now } },
-          { publishAt: { $exists: false } },
-          { expiresAt: { $gte: now } },
-          { expiresAt: { $exists: false } },
-        ],
-      })
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .toArray();
+  const ads = await getAdsCollection();
+  const now = new Date();
+  const rows = await ads
+    .find({
+      isPublished: true,
+      $or: [
+        { publishAt: { $lte: now } },
+        { publishAt: { $exists: false } },
+        { expiresAt: { $gte: now } },
+        { expiresAt: { $exists: false } },
+      ],
+    })
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .toArray();
 
-    const map: Record<string, Ad[]> = {};
-    for (const ad of rows) {
-      if (!map[ad.placement]) map[ad.placement] = [];
-      map[ad.placement].push({ ...ad, id: toId(ad._id) } as Ad);
-    }
-    return map;
-  } catch (err) {
-    logDbFallback("getAllLiveAds", err);
-    return {};
+  const map: Record<string, Ad[]> = {};
+  for (const ad of rows) {
+    if (!map[ad.placement]) map[ad.placement] = [];
+    map[ad.placement].push({ ...ad, id: toId(ad._id) } as Ad);
   }
+  return map;
 }
 
 /* =================== DASHBOARD =================== */
@@ -943,24 +888,19 @@ export async function getJobBySlug(slug: string): Promise<JobWithDetails | null>
 }
 
 export async function getPublicJobs(opts: { status?: string; categoryId?: string; organizationId?: string; limit?: number; sort?: string } = {}): Promise<Job[]> {
-  try {
-    const jobs = await getJobsCollection();
-    const filter: Record<string, unknown> = { isActive: true };
-    if (opts.status) filter.status = opts.status;
-    if (opts.categoryId) filter.categoryId = new ObjectId(opts.categoryId);
-    if (opts.organizationId) filter.organizationId = new ObjectId(opts.organizationId);
+  const jobs = await getJobsCollection();
+  const filter: Record<string, unknown> = { isActive: true };
+  if (opts.status) filter.status = opts.status;
+  if (opts.categoryId) filter.categoryId = new ObjectId(opts.categoryId);
+  if (opts.organizationId) filter.organizationId = new ObjectId(opts.organizationId);
 
-    let sort: Record<string, 1 | -1> = { createdAt: -1 };
-    if (opts.sort === "lastDate") sort = { applicationLastDate: 1 };
-    else if (opts.sort === "vacancies") sort = { totalVacancies: -1 };
-    else if (opts.sort === "popular") sort = { viewCount: -1 };
+  let sort: Record<string, 1 | -1> = { createdAt: -1 };
+  if (opts.sort === "lastDate") sort = { applicationLastDate: 1 };
+  else if (opts.sort === "vacancies") sort = { totalVacancies: -1 };
+  else if (opts.sort === "popular") sort = { viewCount: -1 };
 
-    const rows = await jobs.find(filter).sort(sort).limit(opts.limit ?? 50).toArray();
-    return rows.map((r) => withId(r)) as Job[];
-  } catch (err) {
-    logDbFallback("getPublicJobs", err);
-    return [];
-  }
+  const rows = await jobs.find(filter).sort(sort).limit(opts.limit ?? 50).toArray();
+  return rows.map((r) => withId(r)) as Job[];
 }
 
 export async function getRelatedJobs(jobId: string, limit = 6): Promise<Job[]> {

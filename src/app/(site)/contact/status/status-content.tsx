@@ -1,9 +1,9 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
 import { Bi } from "@/components/bi";
 import { TrackingTimeline } from "@/components/tracking-timeline";
+import { api } from "@/trpc/react";
 
 type ContactRequest = {
   id: string;
@@ -32,7 +32,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> =
   CLOSED: { label: "Closed", color: "text-slate-800", bg: "bg-slate-100" },
 };
 
-function formatDate(date: string | null) {
+function formatDate(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleDateString("en-IN", {
     weekday: "short",
@@ -42,7 +42,7 @@ function formatDate(date: string | null) {
   });
 }
 
-function formatTime(date: string | null) {
+function formatTime(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -72,37 +72,25 @@ function getFinalStatus(status: string): "completed" | "active" | "upcoming" | "
 export function ContactRequestStatusContent() {
   const searchParams = useSearchParams();
   const ticketId = searchParams.get("ticketId");
-  const [loading, setLoading] = useState(true);
-  const [request, setRequest] = useState<ContactRequest | null>(null);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function load() {
-      if (!ticketId) {
-        setError("Ticket ID is required");
-        setLoading(false);
-        return;
-      }
+  const {
+    data: request,
+    isLoading: loading,
+    error: queryError,
+  } = api.contact.status.useQuery(
+    { ticketId: ticketId ?? "" },
+    { enabled: !!ticketId }
+  );
 
-      try {
-        const res = await fetch(`/api/contact/status?ticketId=${encodeURIComponent(ticketId)}`);
-        const data = (await res.json()) as { request?: ContactRequest; error?: string };
-        if (res.ok && data.request) {
-          setRequest(data.request);
-        } else {
-          setError(data.error || "Request not found");
-        }
-      } catch {
-        setError("Failed to load request status");
-      } finally {
-        setLoading(false);
-      }
-    }
+  const error = !ticketId
+    ? "Ticket ID is required"
+    : queryError
+      ? queryError.message || "Failed to load request status"
+      : !loading && !request
+        ? "Request not found"
+        : "";
 
-    void load();
-  }, [ticketId]);
-
-  const getSteps = (req: ContactRequest) => {
+  const getSteps = (req: NonNullable<typeof request>) => {
     const submitted = formatDate(req.submittedAt);
     const submittedTime = formatTime(req.submittedAt);
     const reviewed = formatDate(req.reviewedAt);

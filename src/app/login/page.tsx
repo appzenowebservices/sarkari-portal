@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { signIn } from "next-auth/react";
 import { Icon, LogoMark } from "@/components/icons";
 
 export default function LoginPage() {
@@ -18,17 +19,16 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+      const result = await signIn("credentials", {
+        redirect: false,
+        username,
+        password,
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
+      if (result?.ok && !result.error) {
         router.push("/admin");
         router.refresh();
       } else {
-        setError(data.error ?? "लॉगिन विफल रहा");
+        setError("गलत यूज़रनेम या पासवर्ड");
       }
     } catch {
       setError("नेटवर्क त्रुटि — दोबारा कोशिश करें");

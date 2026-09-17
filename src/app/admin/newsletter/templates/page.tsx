@@ -66,10 +66,10 @@ export default async function AdminNewsletterTemplatesPage() {
         <div className="border-y border-navy-100 px-5 py-3 flex items-center gap-2 text-navy-700">
           <Icon name="pencil" size={16} className="text-leaf-500" />
           <span className="font-bold text-sm">CONTENT AREA — Editable</span>
-          <span className="text-xs font-normal text-ink-soft ml-auto">Managed via Create Newsletter page</span>
+          <span className="text-xs font-normal text-ink-soft ml-auto">Managed via Newsletter Templates</span>
         </div>
         <div className="p-5 bg-paper min-h-[100px]">
-          <p className="text-center text-sm text-ink-soft py-8">Content blocks editor → /admin/newsletter/create</p>
+          <p className="text-center text-sm text-ink-soft py-8">Content blocks are managed from this templates page</p>
         </div>
 
         <div className="border-t border-navy-100 px-5 py-3 flex items-center gap-2 text-navy-700">

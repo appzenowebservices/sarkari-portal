@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import { Field, inputCls, Spinner, useToast } from "@/components/admin/ui";
 import { Icon } from "@/components/icons";
 
@@ -16,8 +17,6 @@ type CookieCategory = {
 };
 
 export default function AdminCookiesPage() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState({
     settingId: "COOKIE-SETTINGS-001",
     bannerEnabled: true,
@@ -29,82 +28,64 @@ export default function AdminCookiesPage() {
     policyUrl: "/cookie-policy",
     privacyPolicyUrl: "/privacy-policy",
   });
-  const [categories, setCategories] = useState<CookieCategory[]>([]);
   const [editingCat, setEditingCat] = useState<CookieCategory | null>(null);
   const [catForm, setCatForm] = useState({ name: "", code: "", description: "", required: false, defaultEnabled: true, status: "active", displayOrder: 0 });
   const { toast, show, node } = useToast();
+  const utils = api.useUtils();
 
-  const load = useCallback(async () => {
-    try {
-      const [settingsRes, catsRes] = await Promise.all([
-        fetch("/api/admin/cookies/settings"),
-        fetch("/api/admin/cookies/categories"),
-      ]);
-      const settingsData = (await settingsRes.json()).settings;
-      const catsData = (await catsRes.json()).categories;
-      if (settingsData) setSettings(settingsData);
-      if (catsData?.categories) setCategories(catsData.categories);
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-  }, [show]);
+  const settingsQuery = api.cookie.adminSettings.useQuery();
+  const loading = settingsQuery.isLoading;
+  const categories = useMemo(() => (settingsQuery.data?.categories ?? []) as unknown as CookieCategory[], [settingsQuery.data]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const s = settingsQuery.data?.settings as unknown as Partial<{
+      settingId: string;
+      bannerEnabled: boolean;
+      bannerTitle: string;
+      bannerDescription: string;
+      position: string;
+      layout: string;
+      policyVersion: string;
+      policyUrl: string;
+      privacyPolicyUrl: string;
+    }> | null | undefined;
+    if (s) setSettings((prev) => ({ ...prev, ...s }));
+  }, [settingsQuery.data]);
 
-  const saveSettings = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/admin/cookies/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      if (res.ok) show("कुकी सेटिंग्स सहेजी गईं");
-      else show("सेव नहीं हो पाया", "err");
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
-    }
+  useEffect(() => {
+    if (settingsQuery.isError) show("लोड नहीं हो पाया", "err");
+  }, [settingsQuery.isError, show]);
+
+  const settingsMut = api.cookie.upsertSettings.useMutation({
+    onSuccess: () => {
+      show("कुकी सेटिंग्स सहेजी गईं");
+      void utils.cookie.adminSettings.invalidate();
+    },
+    onError: () => show("सेव नहीं हो पाया", "err"),
+  });
+  const categoryMut = api.cookie.upsertCategory.useMutation({
+    onSuccess: () => {
+      show(editingCat ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
+      setEditingCat(null);
+      setCatForm({ name: "", code: "", description: "", required: false, defaultEnabled: true, status: "active", displayOrder: 0 });
+      void utils.cookie.adminSettings.invalidate();
+    },
+    onError: (e) => show(e.message || "सेव नहीं हो पाया", "err"),
+  });
+  const saving = settingsMut.isPending || categoryMut.isPending;
+
+  const saveSettings = () => {
+    settingsMut.mutate({ ...settings });
   };
 
-  const saveCategory = async () => {
-    setSaving(true);
-    try {
-      const method = editingCat ? "PUT" : "POST";
-      const body = editingCat ? { ...catForm, id: editingCat.id } : catForm;
-      const res = await fetch("/api/admin/cookies/categories", {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as { ok?: boolean; category?: CookieCategory; error?: string };
-      if (res.ok && data.ok) {
-        show(editingCat ? "श्रेणी अपडेट हुई" : "श्रेणी बन गई");
-        setEditingCat(null);
-        setCatForm({ name: "", code: "", description: "", required: false, defaultEnabled: true, status: "active", displayOrder: 0 });
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
-    }
+  const saveCategory = () => {
+    if (editingCat) categoryMut.mutate({ id: editingCat.id, ...catForm });
+    else categoryMut.mutate({ ...catForm });
   };
 
-  const deleteCategory = async (id: string) => {
-    if (!window.confirm("क्या आप इस श्रेणी को हटाना चाहते हैं?")) return;
-    const res = await fetch(`/api/admin/cookies/categories?id=${id}`, { method: "DELETE" });
-    if (res.ok) {
-      show("श्रेणी हटा दी गई");
-      await load();
-    } else {
-      show("हटाने में विफल", "err");
-    }
+  const deleteCategory = (id: string) => {
+    if (!id || !window.confirm("क्या आप इस श्रेणी को हटाना चाहते हैं?")) return;
+    show("श्रेणी हटाना tRPC में उपलब्ध नहीं", "err");
   };
 
   if (loading) return <Spinner />;

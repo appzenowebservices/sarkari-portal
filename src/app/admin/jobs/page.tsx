@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -59,48 +60,71 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 const LIMIT_OPTIONS = [10, 20, 50, 100, 200];
 
 export default function AdminJobsPage() {
-  const [list, setList] = useState<JobRow[]>([]);
-  const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [sort, setSort] = useState<SortKey>("newest");
   const { show, node } = useToast();
-  const loadRef = useRef<() => void>(null);
 
-  const buildUrl = useCallback(() => {
-    const params = new URLSearchParams();
-    params.set("page", String(page));
-    if (limit < 200) params.set("limit", String(limit));
-    if (sort !== "newest") params.set("sort", sort);
-    if (q.trim()) params.set("q", q.trim());
-    if (filter !== "all") params.set("filter", filter);
-    return `/api/admin/jobs?${params.toString()}`;
-  }, [page, limit, sort, q, filter]);
+  const utils = api.useUtils();
+  const jobsQuery = api.job.adminList.useQuery({
+    page,
+    limit: limit === 200 ? ("all" as const) : limit,
+    sort,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch(buildUrl());
-        const data = (await res.json()) as { jobs: JobRow[]; total: number; page: number; limit: number };
-        if (!cancelled) {
-          setList(data.jobs || []);
-          setTotal(data.total || 0);
-        }
-      } catch {
-        if (!cancelled) show("लोड नहीं हो पाया", "err");
-      }
-    };
-    loadRef.current = load;
-    load();
-    return () => { cancelled = true; };
-  }, [buildUrl, show]);
+  const removeMut = api.job.remove.useMutation({
+    onSuccess: () => utils.job.adminList.invalidate(),
+  });
+  const duplicateMut = api.job.duplicate.useMutation({
+    onSuccess: () => utils.job.adminList.invalidate(),
+  });
+  const updateMut = api.job.update.useMutation({
+    onSuccess: () => utils.job.adminList.invalidate(),
+  });
 
-  const reload = useCallback(() => {
-    loadRef.current?.();
-  }, []);
+  const list: JobRow[] = useMemo(() => {
+    const rows = jobsQuery.data?.jobs ?? [];
+    return rows.map((j) => ({
+      id: j.id,
+      slug: j.slug ?? "",
+      titleHi: j.titleHi ?? "",
+      titleEn: j.titleEn ?? "",
+      categoryId: typeof j.categoryId === "string" ? j.categoryId : (j.categoryId ?? ""),
+      categoryNameHi: j.categoryNameHi ?? "",
+      categoryNameEn: j.categoryNameEn ?? "",
+      organizationId:
+        typeof j.organizationId === "string" ? j.organizationId : (j.organizationId ?? ""),
+      organizationNameHi: j.organizationNameHi ?? "",
+      organizationNameEn: j.organizationNameEn ?? "",
+      jobType: j.jobType ?? "government",
+      status: j.status ?? "draft",
+      isActive: j.isActive ?? true,
+      isFeatured: j.isFeatured ?? false,
+      isUrgent: j.isUrgent ?? false,
+      applicationStartDate: j.applicationStartDate ?? "",
+      applicationLastDate: j.applicationLastDate ?? "",
+      state: (j as { state?: string }).state ?? "",
+      totalVacancies: j.totalVacancies ?? 0,
+      minimumQualification: j.minimumQualification ?? "",
+      minimumAge: j.minimumAge ?? 0,
+      maximumAge: j.maximumAge ?? 0,
+      applyUrl: j.applyUrl ?? "",
+      notificationUrl: j.notificationUrl ?? "",
+      tags: j.tags ?? "",
+      clickCount:
+        (j.clickCount ?? 0) +
+        (j.applyClickCount ?? 0) +
+        (j.notificationClickCount ?? 0) +
+        (j.websiteClickCount ?? 0),
+      createdAt:
+        j.createdAt instanceof Date ? j.createdAt.toISOString() : String(j.createdAt ?? ""),
+      template: j.template ?? "government",
+    }));
+  }, [jobsQuery.data]);
+
+  const total = jobsQuery.data?.total ?? 0;
 
   const totalPages = limit === 200 ? 1 : Math.max(1, Math.ceil(total / limit));
   const safePage = Math.min(page, totalPages);
@@ -125,26 +149,27 @@ export default function AdminJobsPage() {
   }, [list, q, filter]);
 
   const remove = async (j: JobRow) => {
-    const res = await fetch(`/api/admin/jobs/${j.id}`, { method: "DELETE" });
-    if (res.ok) { show("नौकरी हटा दी गई"); await reload(); }
-    else show("हटाने में विफल", "err");
+    try {
+      await removeMut.mutateAsync({ id: j.id });
+      show("नौकरी हटा दी गई");
+    } catch {
+      show("हटाने में विफल", "err");
+    }
   };
 
   const togglePublish = async (j: JobRow) => {
-    await fetch(`/api/admin/jobs/${j.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !j.isActive }),
-    });
-    await reload();
+    try {
+      await updateMut.mutateAsync({ id: j.id, data: { isActive: !j.isActive } });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   const duplicate = async (j: JobRow) => {
-    const res = await fetch(`/api/admin/jobs/${j.id}/duplicate`, { method: "POST" });
-    if (res.ok) {
+    try {
+      await duplicateMut.mutateAsync({ id: j.id });
       show("नौकरी डुप्लीकेट हो गई");
-      await reload();
-    } else {
+    } catch {
       show("डुप्लीकेट नहीं हो पाया", "err");
     }
   };

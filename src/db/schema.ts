@@ -763,64 +763,6 @@ export type ServiceWithCategory = Service & {
 
 /* ───────────────────────── Newsletter ───────────────────────── */
 
-export type NewsletterContentBlock = {
-  id: string;
-  type:
-    | "heading"
-    | "paragraph"
-    | "image"
-    | "button"
-    | "link"
-    | "list"
-    | "divider"
-    | "job_card"
-    | "scheme_card"
-    | "result_card"
-    | "important_update"
-    | "custom_html";
-  data: Record<string, unknown>;
-  order: number;
-};
-
-export type NewsletterCampaign = {
-  id: string;
-  title: string;
-  subject: string;
-  previewText: string;
-  status: "draft" | "scheduled" | "sending" | "sent" | "cancelled" | "failed";
-  contentBlocks: NewsletterContentBlock[];
-  audience: "all" | "active";
-  scheduledAt: Date | null;
-  sentAt: Date | null;
-  senderName: string;
-  senderEmail: string;
-  sentCount: number;
-  deliveredCount: number;
-  openedCount: number;
-  clickedCount: number;
-  bouncedCount: number;
-  unsubscribedCount: number;
-  createdAt: Date;
-  updatedAt: Date;
-  templateVersion: string;
-};
-
-export type NewsletterSendLog = {
-  id: string;
-  campaignId: string;
-  subscriberId: string;
-  email: string;
-  status: "pending" | "sent" | "delivered" | "opened" | "clicked" | "bounced" | "failed" | "unsubscribed";
-  sentAt: Date | null;
-  deliveredAt: Date | null;
-  openedAt: Date | null;
-  clickedAt: Date | null;
-  bouncedAt: Date | null;
-  failureReason: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
 export type NewsletterSetting = {
   id: string;
   key: string;

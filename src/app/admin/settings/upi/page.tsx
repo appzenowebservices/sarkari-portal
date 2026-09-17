@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "@/trpc/react";
 import { Field, inputCls, Spinner, Toggle, useToast } from "@/components/admin/ui";
 import { Icon } from "@/components/icons";
 
@@ -17,7 +18,6 @@ type PaymentSettings = {
 };
 
 export default function AdminUPISettingsPage() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<PaymentSettings>({
     id: "default",
@@ -32,38 +32,36 @@ export default function AdminUPISettingsPage() {
   });
   const { show, node } = useToast();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/settings/payment");
-      const data = (await res.json()) as { settings: PaymentSettings | null };
-      if (res.ok && data.settings) {
-        setSettings(data.settings);
-      }
-    } catch {
-      show("सेटिंग्स लोड नहीं हुईं", "err");
-    } finally {
-      setLoading(false);
-    }
-  }, [show]);
+  const utils = api.useUtils();
+  const paymentQuery = api.payment.adminPaymentSettings.useQuery();
+  const loading = paymentQuery.isLoading;
+  const synced = useRef(false);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const s = paymentQuery.data as unknown as Partial<PaymentSettings> | null | undefined;
+    if (s && !synced.current) {
+      synced.current = true;
+      setSettings((prev) => ({ ...prev, ...s }));
+    }
+  }, [paymentQuery.data]);
+
+  useEffect(() => {
+    if (paymentQuery.isError) show("सेटिंग्स लोड नहीं हुईं", "err");
+  }, [paymentQuery.isError, show]);
+
+  const upsertMut = api.payment.adminUpsertPaymentSettings.useMutation();
 
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/settings/payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      });
-      if (res.ok) {
-        show("सेटिंग्स सेव हो गईं");
-        await load();
-      } else {
-        show("सेव नहीं हो पाया", "err");
-      }
+      const { id, updatedAt, ...payload } = settings;
+      void id;
+      void updatedAt;
+      await upsertMut.mutateAsync({ ...payload });
+      show("सेटिंग्स सेव हो गईं");
+      await utils.payment.adminPaymentSettings.invalidate();
     } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show("सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }

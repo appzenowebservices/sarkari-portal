@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -57,8 +58,6 @@ const PLACEMENT_LABELS: Record<string, string> = {
 };
 
 export default function AdminAdRequestsPage() {
-  const [list, setList] = useState<Req[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -67,20 +66,40 @@ export default function AdminAdRequestsPage() {
   const [saving, setSaving] = useState(false);
   const { show, node } = useToast();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/ad-requests");
-      const data = (await res.json()) as { requests: Req[] };
-      setList(data.requests);
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const utils = api.useUtils();
+  const reqsQuery = api.ads.adminAdRequests.useQuery();
+  const loading = reqsQuery.isLoading;
 
-  useEffect(() => { void load(); }, [load]);
+  const updateReq = api.ads.updateAdRequest.useMutation({
+    onSuccess: () => utils.ads.adminAdRequests.invalidate(),
+  });
+  const deleteReq = api.ads.deleteAdRequest.useMutation({
+    onSuccess: () => utils.ads.adminAdRequests.invalidate(),
+  });
+
+  const list: Req[] = useMemo(() => {
+    const rows = reqsQuery.data ?? [];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name ?? "",
+      email: r.email ?? "",
+      phone: r.phone ?? "",
+      company: r.company ?? "",
+      adType: r.adType ?? "",
+      preferredPlacement: r.preferredPlacement ?? "",
+      duration: r.duration ?? "",
+      budget: r.budget ?? "",
+      message: r.message ?? "",
+      status: r.status ?? "",
+      adminNotes: r.adminNotes ?? "",
+      createdAt:
+        r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt ?? ""),
+    }));
+  }, [reqsQuery.data]);
+
+  const load = async () => {
+    await utils.ads.adminAdRequests.invalidate();
+  };
 
   const filtered = useMemo(() => {
     if (filter === "all") return list;
@@ -122,16 +141,9 @@ export default function AdminAdRequestsPage() {
   const updateStatus = async (id: string, status: string) => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/ad-requests/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, adminNotes: notes }),
-      });
-      if (res.ok) {
-        show("स्थिति अपडेट हो गई");
-        setDetail(null);
-        await load();
-      }
+      await updateReq.mutateAsync({ id, status, adminNotes: notes });
+      show("स्थिति अपडेट हो गई");
+      setDetail(null);
     } catch {
       show("नेटवर्क त्रुटि", "err");
     } finally {
@@ -141,9 +153,12 @@ export default function AdminAdRequestsPage() {
 
   const remove = async (r: Req) => {
     if (!window.confirm(`"${r.name}" का अनुरोध हटाना है?`)) return;
-    const res = await fetch(`/api/admin/ad-requests/${r.id}`, { method: "DELETE" });
-    if (res.ok) { show("अनुरोध हटा दिया गया"); await load(); }
-    else show("हटाने में विफल", "err");
+    try {
+      await deleteReq.mutateAsync({ id: r.id });
+      show("अनुरोध हटा दिया गया");
+    } catch {
+      show("हटाने में विफल", "err");
+    }
   };
 
   const pendingCount = list.filter((r) => r.status === "pending").length;

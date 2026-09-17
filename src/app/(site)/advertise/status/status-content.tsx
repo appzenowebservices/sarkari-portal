@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Bi } from "@/components/bi";
 import { TrackingTimeline } from "@/components/tracking-timeline";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { api } from "@/trpc/react";
 
 type Advertisement = {
   id: string;
@@ -39,7 +39,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> =
   CANCELLED: { label: "Cancelled", color: "text-slate-800", bg: "bg-slate-100" },
 };
 
-function formatDate(date: string | null) {
+function formatDate(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleDateString("en-IN", {
     weekday: "short",
@@ -49,7 +49,7 @@ function formatDate(date: string | null) {
   });
 }
 
-function formatTime(date: string | null) {
+function formatTime(date: string | Date | null | undefined) {
   if (!date) return null;
   return new Date(date).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -62,34 +62,24 @@ export function AdvertiseStatusContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestId = searchParams.get("requestId");
-  const [loading, setLoading] = useState(true);
-  const [ad, setAd] = useState<Advertisement | null>(null);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function load() {
-      if (!requestId) {
-        setLoading(false);
-        return;
-      }
+  const {
+    data: ad,
+    isLoading: queryLoading,
+    error: queryError,
+  } = api.ads.advertisementStatus.useQuery(
+    { requestId: requestId ?? "" },
+    { enabled: !!requestId }
+  );
 
-      try {
-        const res = await fetch(`/api/advertise/status?requestId=${encodeURIComponent(requestId)}`);
-        const data = (await res.json()) as { advertisement?: Advertisement; error?: string };
-        if (res.ok && data.advertisement) {
-          setAd(data.advertisement);
-        } else {
-          setError(data.error || "Advertisement not found");
-        }
-      } catch {
-        setError("Failed to load advertisement status");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void load();
-  }, [requestId]);
+  const loading = !!requestId && queryLoading;
+  const error = !requestId
+    ? ""
+    : queryError
+      ? queryError.message || "Advertisement not found"
+      : !queryLoading && !ad
+        ? "Advertisement not found"
+        : "";
 
   const handleTrack = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -99,18 +89,18 @@ export function AdvertiseStatusContent() {
     }
   };
 
-  const getSteps = (ad: Advertisement) => {
-    const submitted = formatDate(ad.createdAt);
-    const submittedTime = formatTime(ad.createdAt);
-    const updated = formatDate(ad.updatedAt);
-    const updatedTime = formatTime(ad.updatedAt);
+  const getSteps = (item: NonNullable<typeof ad>) => {
+    const submitted = formatDate(item.createdAt);
+    const submittedTime = formatTime(item.createdAt);
+    const updated = formatDate(item.updatedAt);
+    const updatedTime = formatTime(item.updatedAt);
 
-    const paymentStatus = ad.paymentStatus;
+    const paymentStatus = item.paymentStatus;
     const isPaymentPending = paymentStatus === "PENDING";
     const isPaymentVerified = paymentStatus === "PAID" || paymentStatus === "VERIFIED";
     const isPaymentFailed = paymentStatus === "FAILED" || paymentStatus === "REJECTED";
 
-    const adStatus = ad.status;
+    const adStatus = item.status;
     const isUnderReview = ["CONTENT_REVIEW", "CREATIVE_REVIEW"].includes(adStatus);
     const isApproved = ["APPROVED", "SCHEDULED", "LIVE", "PAUSED"].includes(adStatus);
     const isLive = adStatus === "LIVE";
@@ -121,7 +111,7 @@ export function AdvertiseStatusContent() {
       { label: "Payment Pending", date: isPaymentPending ? submitted : isPaymentVerified ? submitted : null, time: isPaymentPending ? submittedTime : isPaymentVerified ? submittedTime : null, description: isPaymentPending ? "Waiting for payment." : isPaymentVerified ? "Payment completed." : "Payment failed.", status: isPaymentPending ? "active" : isPaymentVerified ? "completed" : "rejected" },
       { label: "Payment Verification", date: isPaymentVerified ? (updated || submitted) : null, time: isPaymentVerified ? (updatedTime || submittedTime) : null, description: isPaymentVerified ? "Payment has been verified." : isPaymentFailed ? "Payment verification failed." : "Waiting for payment verification.", status: isPaymentVerified ? "completed" : isPaymentFailed ? "rejected" : "upcoming" },
       { label: "Content Review", date: isUnderReview || isApproved || isLive ? (updated || submitted) : null, time: isUnderReview || isApproved || isLive ? (updatedTime || submittedTime) : null, description: isUnderReview ? "Our team is reviewing your advertisement content." : isApproved || isLive ? "Content has been approved." : "Waiting for content review.", status: isUnderReview ? "active" : isApproved || isLive ? "completed" : "upcoming" },
-      { label: isRejected ? "Rejected" : "Approved", date: isApproved || isLive || isRejected ? (updated || submitted) : null, time: isApproved || isLive || isRejected ? (updatedTime || submittedTime) : null, description: isRejected ? (ad.rejectionReason || "Your advertisement has been rejected.") : isLive ? "Your advertisement is now live!" : isApproved ? "Your advertisement has been approved." : "Waiting for approval.", status: isRejected ? "rejected" : isApproved || isLive ? "completed" : "upcoming" },
+      { label: isRejected ? "Rejected" : "Approved", date: isApproved || isLive || isRejected ? (updated || submitted) : null, time: isApproved || isLive || isRejected ? (updatedTime || submittedTime) : null, description: isRejected ? (item.rejectionReason || "Your advertisement has been rejected.") : isLive ? "Your advertisement is now live!" : isApproved ? "Your advertisement has been approved." : "Waiting for approval.", status: isRejected ? "rejected" : isApproved || isLive ? "completed" : "upcoming" },
     ];
 
     return steps;

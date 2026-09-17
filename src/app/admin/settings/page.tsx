@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "@/trpc/react";
 import { Field, inputCls, Spinner, useToast } from "@/components/admin/ui";
 import { Icon } from "@/components/icons";
 import { toHindi } from "@/lib/transliterate";
 
 export default function AdminSettingsPage() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [site, setSite] = useState({
     ticker: "",
@@ -26,48 +26,50 @@ export default function AdminSettingsPage() {
   const [pwBusy, setPwBusy] = useState(false);
   const { toast, show, node } = useToast();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/settings");
-      const data = (await res.json()) as { settings: Record<string, string> };
-      setSite({
-        ticker: data.settings.ticker ?? "",
-        helpline: data.settings.helpline ?? "",
-        email: data.settings.email ?? "",
-        about: data.settings.about ?? "",
-        footerNote: data.settings.footerNote ?? "",
-        facebook: data.settings.facebook ?? "",
-        twitter: data.settings.twitter ?? "",
-        instagram: data.settings.instagram ?? "",
-        youtube: data.settings.youtube ?? "",
-        linkedin: data.settings.linkedin ?? "",
-        telegram: data.settings.telegram ?? "",
-        whatsapp: data.settings.whatsapp ?? "",
-      });
-    } catch {
-      show("सेटिंग्स लोड नहीं हुईं", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const utils = api.useUtils();
+  const settingsQuery = api.system.adminSettings.useQuery();
+  const loading = settingsQuery.isLoading;
+  const synced = useRef(false);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const rows = settingsQuery.data as unknown as { key: string; value: string }[] | undefined;
+    if (!rows || synced.current) return;
+    synced.current = true;
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = r.value ?? "";
+    setSite({
+      ticker: map.ticker ?? "",
+      helpline: map.helpline ?? "",
+      email: map.email ?? "",
+      about: map.about ?? "",
+      footerNote: map.footerNote ?? "",
+      facebook: map.facebook ?? "",
+      twitter: map.twitter ?? "",
+      instagram: map.instagram ?? "",
+      youtube: map.youtube ?? "",
+      linkedin: map.linkedin ?? "",
+      telegram: map.telegram ?? "",
+      whatsapp: map.whatsapp ?? "",
+    });
+  }, [settingsQuery.data]);
+
+  useEffect(() => {
+    if (settingsQuery.isError) show("सेटिंग्स लोड नहीं हुईं", "err");
+  }, [settingsQuery.isError, show]);
+
+  const upsertMut = api.system.adminUpsertSetting.useMutation();
+  const passwordMut = api.system.changePassword.useMutation();
 
   const saveSite = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(site),
-      });
-      if (res.ok) show("सेटिंग्स सहेज गईं — साइट पर तुरंत लागू");
-      else show("सेव नहीं हो पाया", "err");
+      for (const [key, value] of Object.entries(site)) {
+        await upsertMut.mutateAsync({ key, value });
+      }
+      show("सेटिंग्स सहेज गईं — साइट पर तुरंत लागू");
+      await utils.system.adminSettings.invalidate();
     } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show("सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -84,20 +86,11 @@ export default function AdminSettingsPage() {
     }
     setPwBusy(true);
     try {
-      const res = await fetch("/api/admin/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current: pw.current, next: pw.next }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show("पासवर्ड बदल दिया गया");
-        setPw({ current: "", next: "", confirm: "" });
-      } else {
-        show(data.error ?? "पासवर्ड नहीं बदला जा सका", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      await passwordMut.mutateAsync({ currentPassword: pw.current, newPassword: pw.next });
+      show("पासवर्ड बदल दिया गया");
+      setPw({ current: "", next: "", confirm: "" });
+    } catch (e) {
+      show(e instanceof Error ? e.message : "पासवर्ड नहीं बदला जा सका", "err");
     } finally {
       setPwBusy(false);
     }

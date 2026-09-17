@@ -5,6 +5,7 @@ import { Icon } from "@/components/icons";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { Bi } from "@/components/bi";
+import { api } from "@/trpc/react";
 
 const defaultSettings = {
   about: "APPZENO Sarkari Portal भारत की सरकारी सेवाओं की एक निःशुल्क निर्देशिका है।",
@@ -30,9 +31,11 @@ export default function NewsletterUnsubscribePage({
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"input" | "confirming" | "confirmed" | "error">("input");
   const [message, setMessage] = useState("");
+  const unsubscribe = api.newsletter.unsubscribe.useMutation();
 
   useEffect(() => {
     void fetchSearchParams();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchSearchParams() {
@@ -40,28 +43,23 @@ export default function NewsletterUnsubscribePage({
     setToken(params.token || null);
     setEmail(params.email || "");
 
-    if (params.token || params.email) {
+    if (params.email) {
       setStatus("confirming");
       setLoading(true);
       try {
-        const url = params.token
-          ? `/api/newsletter/unsubscribe?token=${params.token}`
-          : `/api/newsletter/unsubscribe?email=${encodeURIComponent(params.email || "")}`;
-
-        const res = await fetch(url);
-        if (res.ok) {
-          setStatus("confirmed");
-          setMessage("आपने सफलतापूर्वक निष्क्रिय कर दिया है। आपका ईमेल निकाल दिया गया है।");
-        } else {
-          setStatus("error");
-          setMessage("अमान्य या खत्म हुआ टोकन। कृपया अपना ईमेल दर्ज करें।");
-        }
+        await unsubscribe.mutateAsync({ email: params.email });
+        setStatus("confirmed");
+        setMessage("आपने सफलतापूर्वक निष्क्रिय कर दिया है। आपका ईमेल निकाल दिया गया है।");
       } catch {
         setStatus("error");
-        setMessage("An error occurred. Please try again.");
+        setMessage("अमान्य या खत्म हुआ टोकन। कृपया अपना ईमेल दर्ज करें।");
       } finally {
         setLoading(false);
       }
+    } else if (params.token) {
+      setStatus("error");
+      setLoading(false);
+      setMessage("अमान्य या खत्म हुआ टोकन। कृपया अपना ईमेल दर्ज करें।");
     }
   }
 
@@ -75,17 +73,12 @@ export default function NewsletterUnsubscribePage({
     setLoading(true);
     setStatus("confirming");
     try {
-      const res = await fetch(`/api/newsletter/unsubscribe?email=${encodeURIComponent(email)}`);
-      if (res.ok) {
-        setStatus("confirmed");
-        setMessage("आपने सफलतापूर्वक निष्क्रिय कर दिया है। आपका ईमेल निकाल दिया गया है।");
-      } else {
-        setStatus("error");
-        setMessage("हमें आपका ईमेल नहीं मिल सका या आप पहले से ही निष्क्रिय हैं।");
-      }
+      await unsubscribe.mutateAsync({ email: email.trim() });
+      setStatus("confirmed");
+      setMessage("आपने सफलतापूर्वक निष्क्रिय कर दिया है। आपका ईमेल निकाल दिया गया है।");
     } catch {
       setStatus("error");
-      setMessage("An error occurred. Please try again.");
+      setMessage("हमें आपका ईमेल नहीं मिल सका या आप पहले से ही निष्क्रिय हैं।");
     } finally {
       setLoading(false);
     }

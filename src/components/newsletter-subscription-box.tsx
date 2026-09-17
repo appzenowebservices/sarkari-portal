@@ -3,15 +3,33 @@
 import { useState } from "react";
 import { Icon } from "@/components/icons";
 import { Bi } from "@/components/bi";
+import { api } from "@/trpc/react";
 
 export default function NewsletterSubscriptionBox({ compact = false }: { compact?: boolean }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const subscribe = api.newsletter.subscribe.useMutation({
+    onSuccess: (data) => {
+      setStatus("success");
+      setMessage(
+        data?.alreadySubscribed
+          ? "Already subscribed"
+          : "Please check your email to verify your subscription."
+      );
+      setName("");
+      setEmail("");
+    },
+    onError: (err) => {
+      setStatus("error");
+      setMessage(err.message || "Subscription failed. Please try again.");
+    },
+  });
+  const loading = subscribe.isPending;
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setStatus("error");
@@ -19,32 +37,10 @@ export default function NewsletterSubscriptionBox({ compact = false }: { compact
       return;
     }
 
-    setLoading(true);
     setStatus("idle");
     setMessage("");
 
-    try {
-      const res = await fetch("/api/newsletter/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string; message?: string };
-      if (res.ok && data.ok) {
-        setStatus("success");
-        setMessage(data.message || "Please check your email to verify your subscription.");
-        setName("");
-        setEmail("");
-      } else {
-        setStatus("error");
-        setMessage(data.error || "Subscription failed. Please try again.");
-      }
-    } catch {
-      setStatus("error");
-      setMessage("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    subscribe.mutate({ name, email });
   };
 
   if (compact) {

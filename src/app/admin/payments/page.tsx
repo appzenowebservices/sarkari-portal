@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import { DeleteButton, EmptyRow, Field, inputCls, SortTh, Spinner, useToast } from "@/components/admin/ui";
 import { AdminTable } from "@/components/admin/table-pagination";
 import { SlidePanel } from "@/components/admin/slide-panel";
@@ -29,70 +30,53 @@ const PAYMENT_COLORS: Record<string, string> = {
 };
 
 export default function AdminPaymentsPage() {
-  const [loading, setLoading] = useState(true);
-  const [payments, setPayments] = useState<Payment[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Payment | null>(null);
   const [form, setForm] = useState({ status: "", verifiedBy: "", notes: "" });
-  const [saving, setSaving] = useState(false);
   const { show } = useToast();
+  const utils = api.useUtils();
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/payments");
-      const data = (await res.json()) as { payments: Payment[] };
-      if (res.ok) {
-        setPayments(data.payments || []);
-      }
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-  }, [show]);
+  const paymentsQuery = api.payment.adminPayments.useQuery({ page: 1, limit: 200 });
+  const payments = useMemo(() => (paymentsQuery.data?.items ?? []) as unknown as Payment[], [paymentsQuery.data]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (paymentsQuery.isError) show("लोड नहीं हो पाया", "err");
+  }, [paymentsQuery.isError, show]);
+
+  const verifyMut = api.payment.adminVerify.useMutation({
+    onSuccess: () => {
+      show("अपडेट हो गया");
+      setModal(false);
+      void utils.payment.adminPayments.invalidate();
+    },
+    onError: (e) => show(e.message || "सेव नहीं हो पाया", "err"),
+  });
+  const saving = verifyMut.isPending;
 
   const openEdit = (payment: Payment) => {
     setEditing(payment);
     setForm({
       status: payment.status,
-      verifiedBy: payment.verifiedBy,
-      notes: payment.notes,
+      verifiedBy: payment.verifiedBy ?? "",
+      notes: payment.notes ?? "",
     });
     setModal(true);
   };
 
-  const save = async () => {
+  const save = () => {
     if (!editing) return;
-    setSaving(true);
-    try {
-      const updates: Record<string, unknown> = { ...form };
-      if (form.status === "VERIFIED" && !editing.verifiedAt) {
-        updates.verifiedAt = new Date().toISOString();
-      }
-
-      const res = await fetch(`/api/admin/payments/${editing.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-
-      if (res.ok) {
-        show("अपडेट हो गया");
-        setModal(false);
-        await load();
-      } else {
-        show("सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
-    } finally {
-      setSaving(false);
+    if (form.status !== "VERIFIED" && form.status !== "REJECTED") {
+      show("tRPC से केवल Verified / Rejected किया जा सकता है", "err");
+      return;
     }
+    verifyMut.mutate({
+      id: editing.id,
+      status: form.status as "VERIFIED" | "REJECTED",
+      notes: [form.notes, form.verifiedBy ? `Verified by: ${form.verifiedBy}` : ""].filter(Boolean).join("\n"),
+    });
   };
 
-  if (loading) return <Spinner />;
+  if (paymentsQuery.isLoading) return <Spinner />;
 
   return (
     <div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { api } from "@/trpc/react";
 
 type AdType = {
   id: string;
@@ -39,11 +40,16 @@ type PaymentSettings = {
 };
 
 export default function AdvertisePage() {
-  const [adTypes, setAdTypes] = useState<AdType[]>([]);
-  const [placements, setPlacements] = useState<Placement[]>([]);
-  const [durationPlans, setDurationPlans] = useState<DurationPlan[]>([]);
-  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const pricingQuery = api.ads.adPricing.useQuery();
+  const paymentSettingsQuery = api.payment.settings.useQuery();
+  const submitAdvertisement = api.ads.submitAdvertisement.useMutation();
+
+  const adTypes = pricingQuery.data?.adTypes ?? [];
+  const placements = pricingQuery.data?.placements ?? [];
+  const durationPlans = pricingQuery.data?.plans ?? [];
+  const paymentSettings = paymentSettingsQuery.data ?? null;
+  const loading = pricingQuery.isLoading || paymentSettingsQuery.isLoading;
+  const loadError = pricingQuery.error ? "Failed to load pricing data" : "";
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [requestId, setRequestId] = useState("");
@@ -85,26 +91,6 @@ export default function AdvertisePage() {
   });
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch("/api/public/ad-pricing");
-        const data = await res.json();
-        if (res.ok) {
-          setAdTypes(data.adTypes || []);
-          setPlacements(data.placements || []);
-          setDurationPlans(data.durationPlans || []);
-          setPaymentSettings(data.paymentSettings || null);
-        }
-      } catch {
-        setError("Failed to load pricing data");
-      } finally {
-        setLoading(false);
-      }
-    }
-    void load();
-  }, []);
-
-  useEffect(() => {
     const adType = adTypes.find((a) => a.code === form.adTypeCode);
     const placement = placements.find((p) => p.code === form.placementCode);
     const duration = durationPlans.find((d) => d.days === Number(form.durationDays));
@@ -137,20 +123,19 @@ export default function AdvertisePage() {
     setSubmitting(true);
 
     try {
-      const res = await fetch("/api/advertise", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ...calculatedPrice }),
+      const data = await submitAdvertisement.mutateAsync({
+        ...form,
+        durationDays: Number(form.durationDays) || 0,
+        ...calculatedPrice,
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setRequestId(data.request.requestId);
+      if (data.ok) {
+        setRequestId(data.requestId);
         setSubmitted(true);
       } else {
-        setError(data.error || "Failed to submit request");
+        setError("Failed to submit request");
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Failed to submit request");
     } finally {
       setSubmitting(false);
     }
@@ -196,7 +181,7 @@ export default function AdvertisePage() {
       <h1 className="font-display text-3xl font-bold text-navy-950 sm:text-4xl">Advertise on APPZENO Sarkari Portal</h1>
       <p className="mt-2 text-sm text-ink-soft">Reach millions of users looking for government services, jobs, and schemes.</p>
 
-      {error && <p className="mt-4 text-sm font-bold text-rose-600">{error}</p>}
+      {(error || loadError) && <p className="mt-4 text-sm font-bold text-rose-600">{error || loadError}</p>}
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-8">
         {/* Advertiser Information */}

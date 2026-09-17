@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SidebarClient } from "@/components/admin/sidebar-client";
-import { getAdmin } from "@/lib/auth";
+import { auth } from "@/server/auth";
 
 const NAV = [
   { href: "/admin", icon: "dashboard", label: "डैशबोर्ड", exact: true },
@@ -19,8 +19,6 @@ const NAV = [
   { href: "/admin/privacy-requests", icon: "shield", label: "Privacy Requests" },
   { href: "/admin/newsletter", icon: "mail", label: "Newsletter", exact: true },
   { href: "/admin/newsletter/subscribers", icon: "users", label: "Subscribers" },
-  { href: "/admin/newsletter/campaigns", icon: "chart", label: "Campaigns" },
-  { href: "/admin/newsletter/create", icon: "plus", label: "Create Newsletter" },
   { href: "/admin/settings", icon: "settings", label: "सेटिंगें" },
   { href: "/admin/settings/upi", icon: "wallet", label: "UPI Settings" },
 ];
@@ -28,16 +26,17 @@ const NAV = [
 export default async function AdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  let admin = null;
+  let session = null;
   try {
-    admin = await getAdmin();
+    session = await auth();
   } catch {
-    // MongoDB unavailable during build — allow rendering without auth guard
+    // DB unavailable during build — allow rendering without auth guard
   }
 
-  if (!admin) {
+  if (!session?.user) {
     redirect("/login");
   }
 
-  return <SidebarClient admin={{ name: admin.name, username: admin.username }} nav={NAV}>{children}</SidebarClient>;
+  const name = session.user.name ?? "Admin";
+  return <SidebarClient admin={{ name, username: name }} nav={NAV}>{children}</SidebarClient>;
 }

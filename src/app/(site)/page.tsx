@@ -50,7 +50,7 @@ const QUICK_SEARCHES = [
 ];
 
 export default async function HomePage() {
-  const results = await Promise.allSettled([
+  const [categories, popular, fresh, totalClicks, liveAds, servicesByCategory, latestJobs] = await Promise.all([
     getCategories({ alphabetical: true }),
     getPopular(10),
     getFreshServices(10),
@@ -60,36 +60,10 @@ export default async function HomePage() {
     getPublicJobs({ limit: 6, sort: "latest" }),
   ]);
 
-  const categories = results[0].status === "fulfilled" ? results[0].value : [];
-  const popular = results[1].status === "fulfilled" ? results[1].value : [];
-  const fresh = results[2].status === "fulfilled" ? results[2].value : [];
-  const totalClicks = results[3].status === "fulfilled" ? results[3].value : 0;
-  const liveAds = results[4].status === "fulfilled" ? results[4].value : {};
-  const servicesByCategory = results[5].status === "fulfilled" ? results[5].value : {};
-  const latestJobs = results[6].status === "fulfilled" ? results[6].value : [];
-
-  const hasAnyFailure = results.some((r) => r.status === "rejected");
-  if (hasAnyFailure) {
-    const reasons = results
-      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-      .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)).slice(0, 120));
-    console.warn("[HomePage] Some data failed to load, rendering with fallbacks:", reasons);
-  }
-
   const totalServices = categories.reduce((acc, c) => acc + c.serviceCount, 0);
 
   return (
     <main>
-      {hasAnyFailure && (
-        <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <Bi
-              hi="डेटाबेस अस्थायी रूप से उपलब्ध नहीं है — कुछ सेक्शन खाली दिख सकते हैं। कृपया नेटवर्क/DNS जांचें या Atlas IP Whitelist देखें।"
-              en="Database temporarily unavailable — some sections may appear empty. Please check network/DNS or Atlas IP whitelist."
-            />
-          </div>
-        </div>
-      )}
       {/* ============ HERO ============ */}
       <section className="relative overflow-hidden border-b border-navy-100 bg-paper">
         <div className="bg-grid-ink absolute inset-0" aria-hidden />

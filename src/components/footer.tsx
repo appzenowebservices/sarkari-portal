@@ -5,6 +5,7 @@ import { Bi } from "@/components/bi";
 import { Icon, LogoMark } from "@/components/icons";
 import type { CategoryWithCount, ServiceWithCategory } from "@/lib/data";
 import { useState } from "react";
+import { api } from "@/trpc/react";
 
 export function Footer({
   settings,
@@ -17,33 +18,25 @@ export function Footer({
 }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [subscribing, setSubscribing] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubscribe = async (e: React.FormEvent) => {
+  const subscribe = api.newsletter.subscribe.useMutation({
+    onSuccess: () => {
+      setSubscribed(true);
+      setName("");
+      setEmail("");
+    },
+    onError: (err) => {
+      setError(err.message || "Subscription failed");
+    },
+  });
+  const subscribing = subscribe.isPending;
+
+  const handleSubscribe = (e: React.FormEvent) => {
     e.preventDefault();
-    setSubscribing(true);
     setError("");
-    try {
-      const res = await fetch("/api/newsletter/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string; message?: string };
-      if (res.ok && data.ok) {
-        setSubscribed(true);
-        setName("");
-        setEmail("");
-      } else {
-        setError(data.error || "Subscription failed");
-      }
-    } catch {
-      setError("Network error");
-    } finally {
-      setSubscribing(false);
-    }
+    subscribe.mutate({ email, name });
   };
 
   const year = new Date().getFullYear();

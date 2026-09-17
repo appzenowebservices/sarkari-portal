@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { signOut } from "next-auth/react";
 import { Icon } from "@/components/icons";
 
 export function LogoutButton({
@@ -11,18 +11,15 @@ export function LogoutButton({
   className?: string;
   iconOnly?: boolean;
 }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   const logout = async () => {
     setBusy(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await signOut({ callbackUrl: "/login" });
     } catch {
-      /* ignore */
+      setBusy(false);
     }
-    router.push("/login");
-    router.refresh();
   };
 
   if (iconOnly) {

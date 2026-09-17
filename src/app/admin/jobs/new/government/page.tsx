@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import WordPressStyleEditor from "@/components/wordpress-style-editor";
+import { api } from "@/trpc/react";
 
 type JobType = "Sarkari" | "PSU" | "Banking" | "Railway" | "Defence" | "Teaching" | "Police" | "Others";
 
@@ -144,41 +145,65 @@ export default function GovernmentJobPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }, []);
 
+  const createMut = api.job.create.useMutation();
+  const autosaveMut = api.job.autosave.useMutation();
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (form.title.trim()) {
-        fetch("/api/admin/jobs/autosave", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...form, titleEn: form.title }),
-        }).then(() => {
-          setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-        }).catch(() => {});
+        autosaveMut.mutate(
+          { id: form.id, data: { ...form, titleEn: form.title, titleHi: form.title } },
+          {
+            onSuccess: (res) => {
+              if (!form.id && res?.id) setForm((f) => (f.id ? f : { ...f, id: res.id }));
+              setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+            },
+          },
+        );
       }
     }, 3000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
   const handleSave = async (status: "Draft" | "Published" | "Closed") => {
-    setSaving(true);
+    if (status === "Published") setPublishing(true);
+    else setSaving(true);
     try {
-      const res = await fetch("/api/admin/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, status, jobType: "government", titleEn: form.title, titleHi: form.title }),
+      const { id: _formId, ...rest } = form;
+      void _formId;
+      const saved = await createMut.mutateAsync({
+        ...rest,
+        titleEn: form.title,
+        titleHi: form.title,
+        organizationNameEn: form.organization,
+        categoryNameEn: form.categoryName,
+        totalVacancies: form.totalVacancies,
+        state: form.state,
+        locationNames: [form.district || form.state].filter(Boolean),
+        applicationStartDate: form.applicationStartDate,
+        applicationLastDate: form.applicationLastDate,
+        minimumQualification: form.qualification,
+        minimumAge: form.ageLimitMin,
+        maximumAge: form.ageLimitMax,
+        applicationFeeGeneral: form.applicationFeeGeneral,
+        applicationFeeOBC: form.applicationFeeOBC,
+        applicationFeeSC: form.applicationFeeSC,
+        applicationFeeST: form.applicationFeeST,
+        applyUrl: form.applyUrl,
+        notificationUrl: form.notificationUrl,
+        status,
+        jobType: "government",
+        template: "government",
       });
-      const data = await res.json();
-      if (data.ok) {
-        setForm((f) => ({ ...f, id: data.job.id }));
-        setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
-        alert(status === "Published" ? "Job published successfully!" : "Draft saved!");
-      } else {
-        alert(data.error || "Save failed");
-      }
-    } catch {
-      alert("Save failed");
+      setForm((f) => ({ ...f, id: saved.job.id }));
+      setLastSaved(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+      alert(status === "Published" ? "Job published successfully!" : "Draft saved!");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
+      setPublishing(false);
     }
   };
 

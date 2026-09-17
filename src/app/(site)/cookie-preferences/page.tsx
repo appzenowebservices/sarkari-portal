@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import Link from "next/link";
+import { api } from "@/trpc/react";
 
 interface Category {
   id: string;
@@ -14,34 +15,22 @@ interface Category {
 }
 
 export default function CookiePreferencesPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
+  const settingsQuery = api.cookie.settings.useQuery();
+  const saveConsent = api.cookie.saveConsent.useMutation();
+  const categories = settingsQuery.data?.categories ?? [];
   const [prefs, setPrefs] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/cookies/settings");
-        if (!res.ok) return;
-        const data = (await res.json()) as { categories?: Category[] };
-        if (cancelled) return;
-        if (data.categories) {
-          setCategories(data.categories);
-          const initial: Record<string, boolean> = {};
-          for (const c of data.categories) {
-            initial[c.code] = c.defaultEnabled;
-          }
-          setPrefs(initial);
-        }
-      } catch {
-        // ignore
+    if (settingsQuery.data?.categories) {
+      const initial: Record<string, boolean> = {};
+      for (const c of settingsQuery.data.categories) {
+        initial[c.code] = c.defaultEnabled;
       }
+      setPrefs(initial);
     }
-    load();
-    return () => { cancelled = true; };
-  }, []);
+  }, [settingsQuery.data]);
 
   const save = async () => {
     setSaving(true);
@@ -51,22 +40,18 @@ export default function CookiePreferencesPage() {
       const anyOptionalEnabled = categories.some((c) => !c.required && prefs[c.code]);
       const status = allEnabled ? "ACCEPTED_ALL" : anyOptionalEnabled ? "CUSTOMIZED" : "REJECTED_OPTIONAL";
 
-      await fetch("/api/cookies/consent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          anonymousId: getAnonymousId(),
-          sessionId: getSessionId(),
-          consentStatus: status,
-          preferences: prefs,
-          policyVersion: "1.0",
-          consentMethod: "cookie_preferences_page",
-          ipHash: "",
-          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-          deviceType: getDeviceType(),
-          browser: getBrowser(),
-          os: getOS(),
-        }),
+      await saveConsent.mutateAsync({
+        anonymousId: getAnonymousId(),
+        sessionId: getSessionId(),
+        consentStatus: status,
+        preferences: prefs,
+        policyVersion: "1.0",
+        consentMethod: "cookie_preferences_page",
+        ipHash: "",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        deviceType: getDeviceType(),
+        browser: getBrowser(),
+        os: getOS(),
       });
       document.cookie = "addies_cookie_consent=1; path=/; max-age=" + 60 * 60 * 24 * 365 + "; SameSite=Lax";
       setMessage("Preferences saved successfully");

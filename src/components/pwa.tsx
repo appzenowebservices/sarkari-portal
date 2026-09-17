@@ -12,15 +12,10 @@ interface BeforeInstallPromptEvent extends Event {
 export function PWABootstrap() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-    const register = async () => {
-      try {
-        // Only register if /sw.js exists to avoid 404 noise
-        const res = await fetch("/sw.js", { method: "HEAD" });
-        if (!res.ok) return;
-        await navigator.serviceWorker.register("/sw.js");
-      } catch {
+    const register = () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {
         /* offline support is progressive — ignore failures */
-      }
+      });
     };
     if (document.readyState === "complete") register();
     else {

@@ -1,0 +1,856 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  username     String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("admins")
+}
+
+// NextAuth adapter models (JWT strategy still requires tables for adapter)
+model User {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  expires      DateTime
+
+  // legacy custom-session compat fields (optional)
+  token     String?   @unique
+  adminId   String?   @db.ObjectId
+  expiresAt DateTime?
+  createdAt DateTime? @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Category {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug            String   @unique
+  titleHi         String   @default("")
+  titleEn         String   @default("")
+  descriptionHi   String   @default("")
+  descriptionEn   String   @default("")
+  icon            String   @default("")
+  color           String   @default("")
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  seoTitle        String   @default("")
+  metaDescription String   @default("")
+  focusKeyword    String   @default("")
+  ogTitle         String   @default("")
+  ogDescription   String   @default("")
+  ogImage         String   @default("")
+  canonicalUrl    String   @default("")
+  robots          String   @default("index, follow")
+  schemaType      String   @default("")
+  createdAt       DateTime @default(now())
+
+  @@map("categories")
+}
+
+model Service {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  categoryIds   String[] @db.ObjectId
+  titleHi       String   @default("")
+  titleEn       String   @default("")
+  url           String   @default("")
+  descriptionHi String   @default("")
+  descriptionEn String   @default("")
+  tags          String   @default("")
+  isFeatured    Boolean  @default(false)
+  isNew         Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  clickCount    Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([url])
+  @@map("services")
+}
+
+model ServiceClick {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  serviceId String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@index([serviceId])
+  @@map("serviceClicks")
+}
+
+model Setting {
+  id    String @id @default(auto()) @map("_id") @db.ObjectId
+  key   String @unique
+  value String @default("")
+
+  @@map("settings")
+}
+
+model Ad {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  variant         String    @default("")
+  placement       String    @default("")
+  titleHi         String    @default("")
+  titleEn         String    @default("")
+  descriptionHi   String    @default("")
+  descriptionEn   String    @default("")
+  linkUrl         String    @default("")
+  imageUrl        String    @default("")
+  buttonTextHi    String    @default("")
+  buttonTextEn    String    @default("")
+  bgColor         String    @default("")
+  textColor       String    @default("")
+  isPublished     Boolean   @default(false)
+  publishAt       DateTime?
+  expiresAt       DateTime?
+  sortOrder       Int       @default(0)
+  clickCount      Int       @default(0)
+  impressionCount Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  @@index([placement, isPublished])
+  @@map("ads")
+}
+
+model AdRequest {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  name              String   @default("")
+  email             String   @default("")
+  phone             String   @default("")
+  company           String   @default("")
+  adType            String   @default("")
+  preferredPlacement String  @default("")
+  duration          String   @default("")
+  budget            String   @default("")
+  message           String   @default("")
+  status            String   @default("RECEIVED")
+  adminNotes        String   @default("")
+  createdAt         DateTime @default(now())
+
+  @@index([status])
+  @@map("adRequests")
+}
+
+model AdType {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  code          String   @unique
+  nameHi        String   @default("")
+  nameEn        String   @default("")
+  descriptionHi String   @default("")
+  descriptionEn String   @default("")
+  basePrice     Float    @default(0)
+  billingUnit   String   @default("")
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("adTypes")
+}
+
+model Placement {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  code       String   @unique
+  nameHi     String   @default("")
+  nameEn     String   @default("")
+  multiplier Float    @default(1)
+  priority   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("placements")
+}
+
+model DurationPlan {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  days            Int      @unique
+  discountPercent Float    @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("durationPlans")
+}
+
+model Advertisement {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  requestId           String   @unique
+  advertiserName      String   @default("")
+  contactPerson       String   @default("")
+  email               String   @default("")
+  mobile              String   @default("")
+  websiteUrl          String   @default("")
+  businessCategory    String   @default("")
+  adTypeCode          String   @default("")
+  placementCode       String   @default("")
+  durationDays        Int      @default(0)
+  startDate           String   @default("")
+  targetPage          String   @default("")
+  adTitle             String   @default("")
+  shortDescription    String   @default("")
+  ctaText             String   @default("")
+  destinationUrl      String   @default("")
+  creativeType        String   @default("")
+  imageUrl            String   @default("")
+  bannerImageUrl      String   @default("")
+  logoUrl             String   @default("")
+  altText             String   @default("")
+  basePrice           Float    @default(0)
+  placementMultiplier Float    @default(1)
+  grossAmount         Float    @default(0)
+  discountPercent     Float    @default(0)
+  discountAmount      Float    @default(0)
+  subtotal            Float    @default(0)
+  gstPercent          Float    @default(0)
+  gstAmount           Float    @default(0)
+  totalAmount         Float    @default(0)
+  status              String   @default("DRAFT")
+  paymentStatus       String   @default("PENDING")
+  paymentMethod       String   @default("")
+  utrNumber           String   @default("")
+  paymentScreenshot   String   @default("")
+  paymentDate         String   @default("")
+  paymentTime         String   @default("")
+  adminReply          String   @default("")
+  internalNotes       String   @default("")
+  rejectionReason     String   @default("")
+  approvedAt          String?
+  scheduledAt         String?
+  publishedAt         String?
+  expiredAt           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([status])
+  @@map("advertisements")
+}
+
+model Payment {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  advertisementId String?  @db.ObjectId
+  requestId       String   @default("")
+  amount          Float    @default(0)
+  method          String   @default("")
+  utrNumber       String   @default("")
+  screenshot      String   @default("")
+  status          String   @default("PENDING")
+  verifiedAt      String?
+  verifiedBy      String   @default("")
+  notes           String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([requestId])
+  @@index([status])
+  @@map("payments")
+}
+
+model PaymentSettings {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  settingId          String   @unique @default("default")
+  upiEnabled         Boolean  @default(false)
+  upiId              String   @default("")
+  payeeName          String   @default("")
+  merchantName       String   @default("")
+  paymentInstructions String  @default("")
+  gstPercent         Float    @default(18)
+  whatsappNumber     String   @default("")
+  updatedAt          DateTime @updatedAt
+
+  @@map("paymentSettings")
+}
+
+model CookieSettings {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  settingId         String   @unique
+  bannerEnabled     Boolean  @default(true)
+  bannerTitle       String   @default("")
+  bannerDescription String   @default("")
+  position          String   @default("bottom")
+  layout            String   @default("banner")
+  policyVersion     String   @default("1.0")
+  policyUrl         String   @default("")
+  privacyPolicyUrl  String   @default("")
+  updatedBy         String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("cookie_settings")
+}
+
+model CookieCategory {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  categoryId     String   @default("")
+  name           String   @default("")
+  code           String   @unique
+  description    String   @default("")
+  required       Boolean  @default(false)
+  defaultEnabled Boolean  @default(false)
+  status         String   @default("active")
+  displayOrder   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("cookie_categories")
+}
+
+model CookieConsent {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String?  @db.ObjectId
+  anonymousId     String   @default("")
+  sessionId       String   @default("")
+  consentStatus   String   @default("PENDING")
+  preferences     Json     @default("{}")
+  policyVersion   String   @default("1.0")
+  consentMethod   String   @default("")
+  consentTimestamp DateTime @default(now())
+  consentUpdatedAt DateTime @updatedAt
+  ipHash          String   @default("")
+  userAgent       String   @default("")
+  deviceType      String   @default("")
+  browser         String   @default("")
+  os              String   @default("")
+  withdrawn       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([anonymousId])
+  @@map("cookie_consents")
+}
+
+model CookieConsentHistory {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  consentId           String   @db.ObjectId
+  userId              String?  @db.ObjectId
+  anonymousId         String   @default("")
+  previousPreferences Json     @default("{}")
+  newPreferences      Json     @default("{}")
+  action              String   @default("")
+  policyVersion       String   @default("1.0")
+  timestamp           DateTime @default(now())
+  source              String   @default("")
+  createdAt           DateTime @default(now())
+
+  @@map("cookie_consent_history")
+}
+
+model NewsletterSubscriber {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  email             String    @unique
+  name              String    @default("")
+  status            String    @default("pending")
+  source            String    @default("website")
+  preferences       Json      @default("{\"jobs\": true}")
+  isVerified        Boolean   @default(false)
+  verificationToken String?
+  verifiedAt        DateTime?
+  lastEmailAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("newsletter_subscribers")
+}
+
+model NewsletterSetting {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  key       String   @unique
+  value     String   @default("")
+  updatedAt DateTime @updatedAt
+
+  @@map("newsletter_settings")
+}
+
+model PrivacyRequest {
+  id                        String    @id @default(auto()) @map("_id") @db.ObjectId
+  requestId                 String    @unique
+  userId                    String?
+  fullName                  String    @default("")
+  email                     String    @default("")
+  mobile                    String    @default("")
+  accountId                 String    @default("")
+  requestType               String    @default("")
+  subject                   String    @default("")
+  description               String    @default("")
+  requestedDataCategories   String[]  @default([])
+  currentInformation        String    @default("")
+  correctInformation        String    @default("")
+  correctionReason          String    @default("")
+  deletionScope             String[]  @default([])
+  consentCategories         String[]  @default([])
+  communicationPreferences  String[]  @default([])
+  complaintCategory         String    @default("")
+  incidentDate              String    @default("")
+  relatedUrl                String    @default("")
+  attachment                String    @default("")
+  verificationMethod        String    @default("")
+  verificationStatus        String    @default("")
+  status                    String    @default("RECEIVED")
+  priority                  String    @default("normal")
+  assignedTo                String    @default("")
+  internalNotes             String    @default("")
+  reply                     String    @default("")
+  submittedAt               DateTime  @default(now())
+  verifiedAt                DateTime?
+  reviewStartedAt           DateTime?
+  completedAt               DateTime?
+  closedAt                  DateTime?
+  resolution                String    @default("")
+  rejectionReason           String    @default("")
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@map("privacy_requests")
+}
+
+model ContactRequest {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  ticketId      String    @unique
+  fullName      String    @default("")
+  email         String    @default("")
+  requestType   String    @default("")
+  subject       String    @default("")
+  message       String    @default("")
+  attachment    String    @default("")
+  status        String    @default("RECEIVED")
+  priority      String    @default("normal")
+  assignedTo    String    @default("")
+  internalNotes String    @default("")
+  reply         String    @default("")
+  resolution    String    @default("")
+  submittedAt   DateTime  @default(now())
+  reviewedAt    DateTime?
+  completedAt   DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@map("contact_requests")
+}
+
+model JobCategory {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug            String   @unique
+  titleHi         String   @default("")
+  titleEn         String   @default("")
+  descriptionHi   String   @default("")
+  descriptionEn   String   @default("")
+  icon            String   @default("")
+  color           String   @default("")
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  seoTitle        String   @default("")
+  metaDescription String   @default("")
+  focusKeyword    String   @default("")
+  ogTitle         String   @default("")
+  ogDescription   String   @default("")
+  ogImage         String   @default("")
+  canonicalUrl    String   @default("")
+  robots          String   @default("index, follow")
+  schemaType      String   @default("")
+  createdAt       DateTime @default(now())
+
+  @@map("job_categories")
+}
+
+model JobOrganization {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug          String   @unique
+  nameHi        String   @default("")
+  nameEn        String   @default("")
+  abbreviation  String   @default("")
+  website       String   @default("")
+  descriptionHi String   @default("")
+  descriptionEn String   @default("")
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@map("job_organizations")
+}
+
+model JobLocation {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug      String   @unique
+  titleHi   String   @default("")
+  titleEn   String   @default("")
+  state     String   @default("")
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("job_locations")
+}
+
+model JobQualification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug      String   @unique
+  titleHi   String   @default("")
+  titleEn   String   @default("")
+  level     Int      @default(0)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("job_qualifications")
+}
+
+model Job {
+  id                     String    @id @default(auto()) @map("_id") @db.ObjectId
+  slug                   String    @unique
+  titleHi                String    @default("")
+  titleEn                String    @default("")
+  shortDescriptionHi     String    @default("")
+  shortDescriptionEn     String    @default("")
+  organizationId         String?   @db.ObjectId
+  organizationNameHi     String    @default("")
+  organizationNameEn     String    @default("")
+  categoryId             String?   @db.ObjectId
+  categoryNameHi         String    @default("")
+  categoryNameEn         String    @default("")
+  jobType                String    @default("government")
+  sector                 String    @default("")
+  state                  String    @default("")
+  locationNames          String[]  @default([])
+  applicationStartDate   String    @default("")
+  applicationLastDate    String    @default("")
+  notificationDate       String    @default("")
+  totalVacancies         Int       @default(0)
+  minimumQualification   String    @default("")
+  maximumQualification   String    @default("")
+  minimumAge             Int       @default(0)
+  maximumAge             Int       @default(0)
+  applicationFeeGeneral  Int       @default(0)
+  applicationFeeOBC      Int       @default(0)
+  applicationFeeSC       Int       @default(0)
+  applicationFeeST       Int       @default(0)
+  applyUrl               String    @default("")
+  notificationUrl        String    @default("")
+  status                 String    @default("draft")
+  isFeatured             Boolean   @default(false)
+  isUrgent               Boolean   @default(false)
+  isActive               Boolean   @default(true)
+  isGovernment           Boolean   @default(true)
+  template               String    @default("government")
+  blocks                 Json      @default("[]")
+  tags                   String    @default("")
+  seoTitle               String    @default("")
+  metaDescription        String    @default("")
+  focusKeyword           String    @default("")
+  ogTitle                String    @default("")
+  ogDescription          String    @default("")
+  ogImage                String    @default("")
+  canonicalUrl           String    @default("")
+  robots                 String    @default("index, follow")
+  schemaType             String    @default("JobPosting")
+  viewCount              Int       @default(0)
+  clickCount             Int       @default(0)
+  applyClickCount        Int       @default(0)
+  notificationClickCount Int       @default(0)
+  websiteClickCount      Int       @default(0)
+  minimumSalary          Int       @default(0)
+  maximumSalary          Int       @default(0)
+  payScale               String    @default("")
+  sortOrder              Int       @default(0)
+  // private-job fields
+  companyNameEn          String    @default("")
+  companyNameHi          String    @default("")
+  companyLogo            String    @default("")
+  companyWebsite         String    @default("")
+  companyIndustry        String    @default("")
+  companySize            String    @default("")
+  companyLocation        String    @default("")
+  recruiterName          String    @default("")
+  recruiterEmail         String    @default("")
+  recruiterPhone         String    @default("")
+  employmentType         String    @default("")
+  workMode               String    @default("")
+  vacancies              Int       @default(0)
+  experienceFrom         Int       @default(0)
+  experienceTo           Int       @default(0)
+  qualifications         String[]  @default([])
+  salaryType             String    @default("")
+  salaryMin              Int       @default(0)
+  salaryMax              Int       @default(0)
+  salaryPeriod           String    @default("")
+  salaryNotDisclose      Boolean   @default(false)
+  salaryNegotiable       Boolean   @default(false)
+  incentives             String    @default("")
+  benefits               String[]  @default([])
+  applyMethod            String    @default("")
+  externalUrl            String    @default("")
+  applicationEmail       String    @default("")
+  applicationInstructions String   @default("")
+  walkInDate             String    @default("")
+  walkInStartTime        String    @default("")
+  walkInEndTime          String    @default("")
+  walkInVenue            String    @default("")
+  walkInAddress          String    @default("")
+  walkInContactPerson    String    @default("")
+  walkInContactNumber    String    @default("")
+  walkInDocuments        String    @default("")
+  walkInInstructions     String    @default("")
+  genderPreference       String    @default("")
+  ageFrom                Int       @default(0)
+  ageTo                  Int       @default(0)
+  languageRequirement    String    @default("")
+  travelRequired         Boolean   @default(false)
+  willingToRelocate      Boolean   @default(false)
+  drivingLicenseRequired Boolean   @default(false)
+  vehicleRequired        Boolean   @default(false)
+  shiftType              String    @default("")
+  workingHours           String    @default("")
+  applicationLimit       Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  publishedAt            DateTime?
+  expiredAt              DateTime?
+
+  @@index([status])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([categoryId])
+  @@index([organizationId])
+  @@map("jobs")
+}
+
+model JobVacancy {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String @db.ObjectId
+  postNameHi  String @default("")
+  postNameEn  String @default("")
+  total       Int    @default(0)
+  payScale    String @default("")
+  eligibility String @default("")
+  sortOrder   Int    @default(0)
+
+  @@index([jobId])
+  @@map("job_vacancies")
+}
+
+model JobDate {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String @db.ObjectId
+  event       String @default("")
+  date        String @default("")
+  description String @default("")
+  sortOrder   Int    @default(0)
+
+  @@index([jobId])
+  @@map("job_dates")
+}
+
+model JobEligibility {
+  id            String  @id @default(auto()) @map("_id") @db.ObjectId
+  jobId         String  @db.ObjectId
+  qualification String  @default("")
+  required      Boolean @default(true)
+  sortOrder     Int     @default(0)
+
+  @@index([jobId])
+  @@map("job_eligibilities")
+}
+
+model JobFee {
+  id        String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String @db.ObjectId
+  category  String @default("")
+  amount    Int    @default(0)
+  sortOrder Int    @default(0)
+
+  @@index([jobId])
+  @@map("job_fees")
+}
+
+model JobLink {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String  @db.ObjectId
+  nameHi    String  @default("")
+  nameEn    String  @default("")
+  url       String  @default("")
+  linkType  String  @default("")
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  @@index([jobId])
+  @@map("job_links")
+}
+
+model JobDocument {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String  @db.ObjectId
+  nameHi    String  @default("")
+  nameEn    String  @default("")
+  required  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  @@index([jobId])
+  @@map("job_documents")
+}
+
+model JobSelectionStep {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String @db.ObjectId
+  stepNameHi  String @default("")
+  stepNameEn  String @default("")
+  description String @default("")
+  sortOrder   Int    @default(0)
+
+  @@index([jobId])
+  @@map("job_selection_process")
+}
+
+model JobFaq {
+  id         String @id @default(auto()) @map("_id") @db.ObjectId
+  jobId      String @db.ObjectId
+  questionHi String @default("")
+  questionEn String @default("")
+  answerHi   String @default("")
+  answerEn   String @default("")
+  sortOrder  Int    @default(0)
+
+  @@index([jobId])
+  @@map("job_faqs")
+}
+
+model JobTag {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  slug      String   @unique
+  nameHi    String   @default("")
+  nameEn    String   @default("")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("job_tags")
+}
+
+model JobClick {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String   @db.ObjectId
+  linkId    String?  @db.ObjectId
+  linkType  String   @default("")
+  source    String   @default("")
+  device    String   @default("")
+  browser   String   @default("")
+  country   String   @default("")
+  state     String   @default("")
+  timestamp DateTime @default(now())
+
+  @@index([jobId])
+  @@map("job_clicks")
+}
+
+model JobView {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String   @db.ObjectId
+  source    String   @default("")
+  device    String   @default("")
+  browser   String   @default("")
+  country   String   @default("")
+  state     String   @default("")
+  timestamp DateTime @default(now())
+
+  @@index([jobId])
+  @@map("job_views")
+}
+
+model JobHistory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String   @db.ObjectId
+  changedBy   String   @default("")
+  changedField String  @default("")
+  oldValue    String   @default("")
+  newValue    String   @default("")
+  ip          String   @default("")
+  timestamp   DateTime @default(now())
+
+  @@index([jobId])
+  @@map("job_history")
+}
+
+model JobSocialPost {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String    @db.ObjectId
+  platform    String    @default("")
+  postContent String    @default("")
+  postUrl     String    @default("")
+  status      String    @default("DRAFT")
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([jobId])
+  @@map("job_social_posts")
+}
+
+model Company {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  name           String   @unique
+  website        String   @default("")
+  industry       String   @default("")
+  size           String   @default("")
+  location       String   @default("")
+  recruiterName  String   @default("")
+  recruiterEmail String   @default("")
+  recruiterPhone String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("companies")
+}

@@ -1,74 +1,29 @@
 import { MongoClient, Db, Collection, ObjectId } from "mongodb";
 
-function getMongoUri(): string {
-  const uri = process.env.MONGODB_URI as string | undefined;
-  if (!uri) {
-    throw new Error(
-      "MONGODB_URI is required. Check .env at project root or D:/Dev/appZeno/sarkari-portal/src/.env - host should be addies.nukkvam.mongodb.net"
-    );
-  }
-  return uri;
+// Single source of truth is DATABASE_URL (see .env.example).
+// MONGODB_URI is kept as an override for legacy setups.
+const MONGODB_URI = (process.env.MONGODB_URI ?? process.env.DATABASE_URL) as string;
+
+if (!MONGODB_URI) {
+  throw new Error("DATABASE_URL is required");
 }
 
-function getSafeHost(uri: string): string {
-  try {
-    const host = new URL(uri.replace("mongodb+srv://", "https://")).host;
-    return host || "mongodb-host";
-  } catch {
-    return "mongodb-host";
-  }
-}
-
-type GlobalForMongo = typeof globalThis & {
+const globalForDb = globalThis as typeof globalThis & {
   __addiesSarkariPortalDb?: Db;
-  __addiesSarkariPortalClient?: MongoClient;
-  __addiesSarkariPortalClientPromise?: Promise<MongoClient>;
 };
-
-const globalForDb = globalThis as GlobalForMongo;
-
-function createClient(uri: string): MongoClient {
-  return new MongoClient(uri, {
-    serverApi: { version: "1", deprecationErrors: true },
-    // Faster fail in dev so page doesn't hang 30s on DNS failure (querySrv ECONNREFUSED)
-    serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 8000),
-    connectTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 8000),
-    socketTimeoutMS: 10000,
-    // Prefer IPv4 to avoid ECONNREFUSED on hosts with broken IPv6 DNS
-    family: 4,
-    retryWrites: true,
-  });
-}
 
 export async function getDb(): Promise<Db> {
   if (globalForDb.__addiesSarkariPortalDb) {
     return globalForDb.__addiesSarkariPortalDb;
   }
 
-  if (!globalForDb.__addiesSarkariPortalClientPromise) {
-    const uri = getMongoUri();
-    const client = createClient(uri);
-    globalForDb.__addiesSarkariPortalClient = client;
-    globalForDb.__addiesSarkariPortalClientPromise = client
-      .connect()
-      .catch((err: unknown) => {
-        // Clear promise so next request can retry instead of caching rejected promise
-        globalForDb.__addiesSarkariPortalClientPromise = undefined;
-        globalForDb.__addiesSarkariPortalClient = undefined;
-        const host = getSafeHost(uri);
-        const code = (err as { code?: string })?.code;
-        const message = err instanceof Error ? err.message : String(err);
-        // Provide actionable hint for querySrv ECONNREFUSED
-        const hint =
-          code === "ECONNREFUSED" || message.includes("querySrv")
-            ? ` DNS SRV lookup failed for ${host}. Check: 1) Atlas Network Access IP whitelist (add 0.0.0.0/0 for dev), 2) Cluster is Active, 3) Local DNS - try switching to 8.8.8.8/1.1.1.1, 4) Firewall/VPN blocking DNS. Fallback: use standard mongodb:// connection string from Atlas.`
-            : "";
-        console.error(`[db] MongoDB connection failed (${host}): ${message}${hint}`);
-        throw err;
-      });
-  }
-
-  const client = await globalForDb.__addiesSarkariPortalClientPromise;
+  const client = new MongoClient(MONGODB_URI, {
+    serverApi: { version: "1", deprecationErrors: true },
+    serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 30000),
+    connectTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 30000),
+    socketTimeoutMS: 10000,
+  });
+  await client.connect();
   const db = client.db();
 
   globalForDb.__addiesSarkariPortalDb = db;
@@ -397,19 +352,3 @@ export async function getCompaniesCollection(): Promise<Collection<any>> {
 
 /* ───────────────────────── Newsletter Collections ───────────────────────── */
 
-export async function getNewsletterCampaignsCollection(): Promise<Collection<any>> {
-  const col = await getCollection("newsletter_campaigns");
-  await col.createIndex({ status: 1 });
-  await col.createIndex({ scheduledAt: 1 });
-  await col.createIndex({ createdAt: -1 });
-  return col;
-}
-
-export async function getNewsletterSendLogsCollection(): Promise<Collection<any>> {
-  const col = await getCollection("newsletter_send_logs");
-  await col.createIndex({ campaignId: 1 });
-  await col.createIndex({ subscriberId: 1 });
-  await col.createIndex({ email: 1 });
-  await col.createIndex({ status: 1 });
-  return col;
-}

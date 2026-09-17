@@ -5,12 +5,14 @@ import { Icon } from "@/components/icons";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { Bi } from "@/components/bi";
+import { api } from "@/trpc/react";
 
 export default function NewsletterPreferencesPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const subscribe = api.newsletter.subscribe.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,23 +27,22 @@ export default function NewsletterPreferencesPage() {
     setMessage("");
 
     try {
-      const res = await fetch("/api/newsletter/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string; message?: string };
-      if (res.ok && data.ok) {
+      const data = await subscribe.mutateAsync({ email: email.trim() });
+      if (data.ok) {
         setStatus("success");
-        setMessage(data.message || "Please check your email to verify your subscription.");
+        setMessage(
+          data.alreadySubscribed
+            ? "Already subscribed"
+            : "Please check your email to verify your subscription."
+        );
         setEmail("");
       } else {
         setStatus("error");
-        setMessage(data.error || "Subscription failed. Please try again.");
+        setMessage("Subscription failed. Please try again.");
       }
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setMessage("Network error. Please try again.");
+      setMessage(err instanceof Error && err.message ? err.message : "Network error. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { api } from "@/trpc/react";
 import {
   DeleteButton,
   EmptyRow,
@@ -40,8 +41,6 @@ const EMPTY_FORM = {
 };
 
 export default function AdminJobOrganizationsPage() {
-  const [list, setList] = useState<Org[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Org | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -49,6 +48,33 @@ export default function AdminJobOrganizationsPage() {
   const [sortCol, setSortCol] = useState<string | null>("sortOrder");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { toast, show, node } = useToast();
+
+  const utils = api.useUtils();
+  const orgsQuery = api.jobTaxonomy.organizations.useQuery();
+  const loading = orgsQuery.isLoading;
+
+  const upsertOrg = api.jobTaxonomy.upsertOrganization.useMutation({
+    onSuccess: () => utils.jobTaxonomy.organizations.invalidate(),
+  });
+  const deleteOrg = api.jobTaxonomy.deleteOrganization.useMutation({
+    onSuccess: () => utils.jobTaxonomy.organizations.invalidate(),
+  });
+
+  const list: Org[] = useMemo(() => {
+    const rows = orgsQuery.data ?? [];
+    return rows.map((o) => ({
+      id: o.id,
+      slug: o.slug ?? "",
+      nameHi: o.nameHi ?? "",
+      nameEn: o.nameEn ?? "",
+      abbreviation: o.abbreviation ?? "",
+      website: o.website ?? "",
+      descriptionHi: o.descriptionHi ?? "",
+      descriptionEn: o.descriptionEn ?? "",
+      isActive: (o as { isActive?: boolean }).isActive ?? true,
+      sortOrder: o.sortOrder ?? 0,
+    }));
+  }, [orgsQuery.data]);
 
   const handleSort = (col: string) => {
     if (sortCol === col) {
@@ -78,23 +104,6 @@ export default function AdminJobOrganizationsPage() {
     });
   }, [list, sortCol, sortDir]);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/jobs/organizations");
-      const data = (await res.json()) as { organizations: Org[] };
-      setList(data.organizations);
-    } catch {
-      show("लोड नहीं हो पाया", "err");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const openNew = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
@@ -123,24 +132,13 @@ export default function AdminJobOrganizationsPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(
-        editing ? `/api/admin/jobs/organizations/${editing.id}` : "/api/admin/jobs/organizations",
-        {
-          method: editing ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
+      await upsertOrg.mutateAsync(
+        editing ? { id: editing.id, ...form } : { ...form },
       );
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok) {
-        show(editing ? "संस्थान अपडेट हुआ" : "संस्थान बन गया");
-        setModal(false);
-        await load();
-      } else {
-        show(data.error ?? "सेव नहीं हो पाया", "err");
-      }
-    } catch {
-      show("नेटवर्क त्रुटि", "err");
+      show(editing ? "संस्थान अपडेट हुआ" : "संस्थान बन गया");
+      setModal(false);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "सेव नहीं हो पाया", "err");
     } finally {
       setSaving(false);
     }
@@ -148,22 +146,20 @@ export default function AdminJobOrganizationsPage() {
 
   const remove = async (o: Org) => {
     if (!window.confirm(`"${o.nameHi}" संस्थान हटाना है?`)) return;
-    const res = await fetch(`/api/admin/jobs/organizations/${o.id}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await deleteOrg.mutateAsync({ id: o.id });
       show("संस्थान हटा दिया गया");
-      await load();
-    } else {
+    } catch {
       show("हटाने में विफल", "err");
     }
   };
 
   const toggleActive = async (o: Org) => {
-    const res = await fetch(`/api/admin/jobs/organizations/${o.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !o.isActive }),
-    });
-    if (res.ok) await load();
+    try {
+      await upsertOrg.mutateAsync({ id: o.id, isActive: !o.isActive });
+    } catch {
+      show("अपडेट नहीं हो पाया", "err");
+    }
   };
 
   return (
