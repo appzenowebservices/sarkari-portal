@@ -28,8 +28,8 @@ export function JobCard({
     : { badge: "bg-leaf-100 text-leaf-800", icon: "building", label: "सरकारी", labelEn: "Government" };
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-navy-100 bg-surface shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
-      <div className="flex flex-col lg:flex-row">
+    <div className="@container group overflow-hidden rounded-2xl border border-navy-100 bg-surface shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+      <div className="flex flex-col @[34rem]:flex-row">
         <div className="flex-1 p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${cmeta.badge}`}>
@@ -56,7 +56,7 @@ export function JobCard({
               <Bi hi={job.organizationNameHi} en={job.organizationNameEn} />
             </p>
           )}
-          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="mt-4 grid grid-cols-2 gap-2.5 @[26rem]:grid-cols-4">
             <Fact icon="users" label={<Bi hi="रिक्तियां" en="Vacancies" />} value={job.totalVacancies > 0 ? job.totalVacancies.toLocaleString("en-IN") : "—"} />
             <Fact icon="fileText" label={<Bi hi="योग्यता" en="Qualification" />} value={job.minimumQualification || "—"} />
             <Fact icon="clock" label={<Bi hi="आयु सीमा" en="Age Limit" />} value={
@@ -94,7 +94,7 @@ export function JobCard({
             )}
           </div>
         </div>
-        <div className="flex flex-row items-center gap-2 border-t border-navy-100 bg-navy-50/40 p-4 lg:w-52 lg:flex-col lg:justify-center lg:border-l lg:border-t-0">
+        <div className="flex flex-col gap-2 border-t border-navy-100 bg-navy-50/40 p-4 @[34rem]:w-52 @[34rem]:justify-center @[34rem]:border-l @[34rem]:border-t-0">
           <Link
             href={`/jobs/${job.slug}`}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-navy-900 px-4 py-2.5 text-sm font-bold text-white transition-all hover:bg-navy-800 active:scale-95"
@@ -132,10 +132,10 @@ export function JobCard({
 
 function Fact({ icon, label, value }: { icon: string; label: React.ReactNode; value: string }) {
   return (
-    <div className="rounded-lg border border-navy-100 bg-surface px-2.5 py-2">
-      <p className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-ink-soft">
-        <Icon name={icon} size={11} className="text-navy-400" />
-        {label}
+    <div className="min-w-0 rounded-lg border border-navy-100 bg-surface px-2.5 py-2">
+      <p className="flex items-center gap-1 truncate text-[10px] font-extrabold uppercase tracking-wider text-ink-soft">
+        <Icon name={icon} size={11} className="shrink-0 text-navy-400" />
+        <span className="truncate">{label}</span>
       </p>
       <p className="mt-0.5 truncate text-[13px] font-extrabold text-navy-900" title={value}>{value}</p>
     </div>

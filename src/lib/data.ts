@@ -33,6 +33,25 @@ export interface DateRange {
   to: Date;
 }
 
+/**
+ * Run a DB query with backoff retries, then fall back. Atlas connectivity
+ * from some networks drops in waves (transient DNS/TLS blips) — Server
+ * Components should ride out a blip and render partial/empty sections
+ * instead of throwing a 500.
+ */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function resilient<T>(fn: () => Promise<T>, fallback: T, retries = 2): Promise<T> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch {
+      if (i < retries) await sleep(2000 * (i + 1));
+    }
+  }
+  return fallback;
+}
+
 export const DEFAULT_SETTINGS: Record<string, string> = {
   ticker:
     "आयुष्मान कार्ड, ई-श्रम कार्ड और PM सूर्य घर — नई सेवाएं जोड़ दी गई हैं • वोटर लिस्ट में नाम जोड़ने की तिथि जांचें • पोर्टल की सभी सेवाएं पूर्णतः निःशुल्क हैं",

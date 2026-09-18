@@ -10,15 +10,11 @@ import { ServiceCard } from "@/components/service-card";
 import { JobCard } from "@/components/job-card";
 import { TrackLink } from "@/components/track-link";
 import {
-  getAllLiveAds,
-  getCategories,
-  getFreshServices,
-  getPopular,
-  getPublicJobs,
-  getServicesByCategory,
-  getTotalClicks,
+  resilient,
 } from "@/lib/data";
-import type { Ad, CategoryWithCount, Job, ServiceWithCategory } from "@/db/schema";
+import { attachCategories } from "@/lib/with-categories";
+import { api } from "@/trpc/server";
+import type { Ad, Job, ServiceWithCategory } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -51,27 +47,38 @@ const QUICK_SEARCHES = [
 ];
 
 export default async function HomePage() {
-  let categories: CategoryWithCount[] = [];
-  let popular: ServiceWithCategory[] = [];
-  let fresh: ServiceWithCategory[] = [];
-  let totalClicks = 0;
-  let liveAds: Record<string, Ad[]> = {};
-  let servicesByCategory: Record<string, ServiceWithCategory[]> = {};
-  let latestJobs: Job[] = [];
+  // Primary data via tRPC/Prisma (works where the raw driver cannot).
+  // Each fetch retries with backoff, then falls back — a DB blip must not 500 the homepage.
+  const [cats, popRaw, freshRaw, totalClicks, adsRaw, tJobs] = await Promise.all([
+    resilient(() => api.catalog.categories({ includeInactive: false }), []),
+    resilient(() => api.catalog.popularServices({ limit: 10 }), []),
+    resilient(() => api.catalog.freshServices({ limit: 10 }), []),
+    resilient(() => api.catalog.totalClicks(), 0),
+    resilient(() => api.ads.liveAds(), []),
+    resilient(() => api.job.list({ limit: 6, sort: "latest" }), []),
+  ]);
 
-  try {
-    [categories, popular, fresh, totalClicks, liveAds, servicesByCategory, latestJobs] = await Promise.all([
-      getCategories({ alphabetical: true }),
-      getPopular(10),
-      getFreshServices(10),
-      getTotalClicks(),
-      getAllLiveAds(),
-      getServicesByCategory(10, true),
-      getPublicJobs({ limit: 6, sort: "latest" }),
-    ]);
-  } catch {
-    // DB unreachable — render the page with empty sections instead of crashing.
+  const categories = cats;
+  const popular = attachCategories(popRaw, cats);
+  const fresh = attachCategories(freshRaw, cats);
+
+  const liveAds: Record<string, Ad[]> = {};
+  for (const ad of adsRaw) {
+    const key = ad.placement;
+    if (!liveAds[key]) liveAds[key] = [];
+    liveAds[key].push(ad as Ad);
   }
+
+  const latestJobs = tJobs as unknown as Job[];
+
+  // Services grouped per category (top 10 categories).
+  const grouped = await Promise.all(
+    cats.slice(0, 10).map(async (c) => {
+      const rows = await resilient(() => api.catalog.servicesByCategory({ slug: c.slug }), []);
+      return [c.slug, attachCategories(rows, cats)] as const;
+    }),
+  );
+  const servicesByCategory: Record<string, ServiceWithCategory[]> = Object.fromEntries(grouped);
 
   const totalServices = categories.reduce((acc, c) => acc + c.serviceCount, 0);
 

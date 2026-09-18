@@ -217,12 +217,13 @@ export const jobRouter = createTRPCRouter({
   }),
 
   stats: protectedProcedure.query(async ({ ctx }) => {
-    const [total, active, featured, govt, priv] = await Promise.all([
+    const [total, active, featured, govt, priv, vacAgg] = await Promise.all([
       ctx.db.job.count(), ctx.db.job.count({ where: { isActive: true } }),
       ctx.db.job.count({ where: { isFeatured: true } }), ctx.db.job.count({ where: { jobType: "government" } }),
       ctx.db.job.count({ where: { jobType: "private" } }),
+      ctx.db.job.aggregate({ where: { isActive: true }, _sum: { totalVacancies: true } }),
     ]);
-    return { total, active, featured, government: govt, private: priv };
+    return { total, active, featured, government: govt, private: priv, totalVacancies: vacAgg._sum.totalVacancies ?? 0 };
   }),
 
   autosave: protectedProcedure.input(z.object({ id: z.string().optional(), data: z.record(z.string(), z.unknown()) })).mutation(async ({ ctx, input }) => {

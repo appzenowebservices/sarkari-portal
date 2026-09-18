@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { JobsExplorer } from "@/components/jobs-explorer";
-import { getPublicJobs, getJobStats } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { api } from "@/trpc/server";
+import type { PublicJob } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -16,22 +18,36 @@ export default async function JobsPage({
   searchParams: Promise<{ q?: string; status?: string; categoryId?: string; organizationId?: string; sort?: string }>;
 }) {
   const params = await searchParams;
-  let jobs: Awaited<ReturnType<typeof getPublicJobs>> = [];
-  let stats = { totalJobs: 0, totalVacancies: 0 };
-  try {
-    [jobs, stats] = await Promise.all([
-      getPublicJobs({
-        status: params.status || undefined,
-        categoryId: params.categoryId || undefined,
-        organizationId: params.organizationId || undefined,
-        sort: params.sort || undefined,
-        limit: 200,
-      }),
-      getJobStats(),
-    ]);
-  } catch {
-    // DB unreachable — render the page with empty results instead of crashing.
-  }
+  // Retry once per fetch, then render empty — a DB blip must not 500 the page.
+  const validSort = ["latest", "lastDate", "vacancies", "popular"] as const;
+  const sort = validSort.includes(params.sort as (typeof validSort)[number])
+    ? (params.sort as (typeof validSort)[number])
+    : undefined;
+  // tRPC/Prisma reads (the raw driver cannot reach the DB from some networks).
+  const [tJobs, tStats] = await Promise.all([
+    resilient(
+      () =>
+        api.job.list({
+          status: params.status || undefined,
+          categoryId: params.categoryId || undefined,
+          organizationId: params.organizationId || undefined,
+          sort,
+          limit: 200,
+        }) as unknown as Promise<PublicJob[]>,
+      [] as PublicJob[],
+    ),
+    resilient(() => api.job.stats(), {
+      total: 0,
+      active: 0,
+      featured: 0,
+      government: 0,
+      private: 0,
+      totalVacancies: 0,
+    }),
+  ]);
+
+  const jobs = tJobs;
+  const stats = { totalJobs: tStats.total, totalVacancies: tStats.totalVacancies };
 
   const flat = jobs.map((j) => {
     const category = (j as any).isGovernment !== false ? "government" : "private";

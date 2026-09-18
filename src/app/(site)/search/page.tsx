@@ -6,7 +6,9 @@ import { SearchBox } from "@/components/header";
 import { Icon } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
 import { ServiceCard } from "@/components/service-card";
-import { getAdsForPlacement, getCategories, getPopular, searchServices } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { attachCategories } from "@/lib/with-categories";
+import { api } from "@/trpc/server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,12 +42,15 @@ export default async function SearchPage({
   const { q } = await searchParams;
   const query = (q ?? "").trim();
 
-  const [results, categories, popular, searchAds] = await Promise.all([
-    query ? searchServices(query, 40) : Promise.resolve([]),
-    getCategories({ alphabetical: true }),
-    getPopular(8),
-    getAdsForPlacement("search_top"),
+  const [tResults, tCats, tPop, searchAds] = await Promise.all([
+    query ? resilient(() => api.system.search({ q: query, limit: 40 }), { services: [], jobs: [] }) : Promise.resolve({ services: [], jobs: [] }),
+    resilient(() => api.catalog.categories({ includeInactive: false }), []),
+    resilient(() => api.catalog.popularServices({ limit: 8 }), []),
+    resilient(() => api.ads.adsForPlacement({ placement: "search_top" }), []),
   ]);
+  const categories = tCats;
+  const results = attachCategories(tResults.services, tCats);
+  const popular = attachCategories(tPop, tCats);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">

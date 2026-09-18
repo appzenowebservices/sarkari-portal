@@ -5,8 +5,9 @@ import { Reveal } from "@/components/reveal";
 import { Bi } from "@/components/bi";
 import { Icon } from "@/components/icons";
 import { JobCard } from "@/components/job-card";
-import { getPublicJobs, getJobCategories, getSettings } from "@/lib/data";
-import type { JobCategory, Job } from "@/db/schema";
+import { resilient } from "@/lib/data";
+import { api } from "@/trpc/server";
+import type { Job, JobCategory } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   try {
-    const categories = await getJobCategories();
+    const tCats = await resilient(() => api.jobTaxonomy.categories(), []);
+    const categories = tCats as unknown as JobCategory[];
     const category = categories.find((c) => c.slug === slug);
     if (!category) return { title: "Category Not Found" };
     return {
@@ -41,10 +43,13 @@ export default async function JobCategoryPage({
   let category: JobCategory | undefined;
 
   try {
-    categories = await getJobCategories();
-    category = categories.find((c) => c.slug === slug);
-    if (!category) return notFound();
-    jobs = await getPublicJobs({ categoryId: category.id, limit: 50 });
+    const tCats = await resilient(() => api.jobTaxonomy.categories(), []);
+    categories = tCats as unknown as JobCategory[];
+    const found = categories.find((c) => c.slug === slug);
+    if (!found) return notFound();
+    category = found;
+    const tJobs = await resilient(() => api.job.list({ categoryId: found.id, limit: 50 }), []);
+    jobs = tJobs as unknown as Job[];
   } catch {
     return notFound();
   }

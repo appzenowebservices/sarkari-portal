@@ -2,7 +2,7 @@ import Link from "next/link";
 import { BarsChart, StatCard } from "@/components/admin/widgets";
 import { Bi } from "@/components/bi";
 import { colorOf, Icon } from "@/components/icons";
-import { getDashboardStats } from "@/lib/data";
+import { getDashboardStats, resilient } from "@/lib/data";
 import { timeAgo } from "@/lib/utils";
 import { DateFilter } from "@/components/admin/date-filter";
 
@@ -18,7 +18,20 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
         to: new Date(params.to),
       }
     : undefined;
-  const stats = await getDashboardStats(dateRange);
+  const stats = await resilient(() => getDashboardStats(dateRange), {
+    totalServices: 0,
+    activeServices: 0,
+    totalCategories: 0,
+    totalClicks: 0,
+    todayClicks: 0,
+    totalAds: 0,
+    liveAds: 0,
+    totalAdRequests: 0,
+    pendingAdRequests: 0,
+    series: [],
+    topServices: [],
+    latestServices: [],
+  } as Awaited<ReturnType<typeof getDashboardStats>>);
 
   return (
     <div>

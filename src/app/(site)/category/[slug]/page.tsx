@@ -6,7 +6,9 @@ import { Bi } from "@/components/bi";
 import { CategoryLinksTable } from "@/components/category-links-table";
 import { colorOf, Icon } from "@/components/icons";
 import { Reveal } from "@/components/reveal";
-import { getAdsForPlacement, getCategories, getServicesForCategory } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { attachCategories } from "@/lib/with-categories";
+import { api } from "@/trpc/server";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +18,11 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  try {
-    const categories = await getCategories({ alphabetical: true });
-    const category = categories.find((c) => c.slug === slug);
-    return {
-      title: category ? `${category.titleEn} — ${category.titleHi}` : "Category",
-    };
-  } catch {
-    return { title: "Category" };
-  }
+  const tCats = await resilient(() => api.catalog.categories({ includeInactive: false }), []);
+  const category = tCats.find((c) => c.slug === slug);
+  return {
+    title: category ? `${category.titleEn} — ${category.titleHi}` : "Category",
+  };
 }
 
 export default async function CategoryPage({
@@ -34,17 +32,14 @@ export default async function CategoryPage({
 }) {
   const { slug } = await params;
 
-  let categories, services, topAds, bottomAds;
-  try {
-    [categories, services, topAds, bottomAds] = await Promise.all([
-      getCategories({ alphabetical: true }),
-      getServicesForCategory(slug),
-      getAdsForPlacement("category_top"),
-      getAdsForPlacement("category_bottom"),
-    ]);
-  } catch {
-    return notFound();
-  }
+  const [tCats, tSvc, topAds, bottomAds] = await Promise.all([
+    resilient(() => api.catalog.categories({ includeInactive: false }), []),
+    resilient(() => api.catalog.servicesByCategory({ slug }), []),
+    resilient(() => api.ads.adsForPlacement({ placement: "category_top" }), []),
+    resilient(() => api.ads.adsForPlacement({ placement: "category_bottom" }), []),
+  ]);
+  const categories = tCats;
+  const services = attachCategories(tSvc, tCats);
   const category = categories.find((c) => c.slug === slug);
   if (!category) notFound();
 

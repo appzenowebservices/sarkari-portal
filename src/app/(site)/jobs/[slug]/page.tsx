@@ -5,7 +5,9 @@ import { Reveal } from "@/components/reveal";
 import { Bi } from "@/components/bi";
 import { Icon } from "@/components/icons";
 import { AdSection } from "@/components/ad-slot";
-import { getJobBySlug, getRelatedJobs, getJobCategories, getSettings } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { api } from "@/trpc/server";
+import type { Job } from "@/db/schema";
 import { JobCard } from "@/components/job-card";
 import { JobBlockRenderer } from "@/components/job-block-renderer";
 
@@ -17,8 +19,9 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const job = await getJobBySlug(slug);
-  if (!job) return { title: "Job Not Found" };
+  const tJob = await resilient(() => api.job.bySlug({ slug }), null);
+  if (!tJob) return { title: "Job Not Found" };
+  const job = tJob as unknown as Job;
   return {
     title: `${job.titleEn} — ${job.titleHi} | APPZENO Sarkari Portal`,
     description: job.metaDescription || job.shortDescriptionEn || job.shortDescriptionHi,
@@ -37,12 +40,11 @@ export default async function JobDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const job = await getJobBySlug(slug);
-  if (!job) return notFound();
+  const tJob = await resilient(() => api.job.bySlug({ slug }), null);
+  if (!tJob) return notFound();
+  const job = tJob as unknown as Job;
 
-  const related = await getRelatedJobs(job.id, 6);
-  const categories = await getJobCategories();
-  const settings = await getSettings();
+  const related = (await resilient(() => api.job.related({ slug, limit: 6 }), [])) as unknown as Job[];
 
   const lastDate = job.applicationLastDate ? new Date(job.applicationLastDate) : null;
   const now = new Date();

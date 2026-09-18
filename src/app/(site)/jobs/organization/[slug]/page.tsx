@@ -5,7 +5,9 @@ import { Reveal } from "@/components/reveal";
 import { Bi } from "@/components/bi";
 import { Icon } from "@/components/icons";
 import { JobCard } from "@/components/job-card";
-import { getPublicJobs, getJobOrganizations } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { api } from "@/trpc/server";
+import type { Job } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,8 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const orgs = await getJobOrganizations();
+  const tOrgs = await resilient(() => api.jobTaxonomy.organizations(), []);
+  const orgs = tOrgs;
   const org = orgs.find((o) => o.slug === slug);
   if (!org) return { title: "Organization Not Found" };
   return {
@@ -30,11 +33,13 @@ export default async function JobOrganizationPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const orgs = await getJobOrganizations();
+  const tOrgs = await resilient(() => api.jobTaxonomy.organizations(), []);
+  const orgs = tOrgs;
   const org = orgs.find((o) => o.slug === slug);
   if (!org) return notFound();
 
-  const jobs = await getPublicJobs({ organizationId: org.id, limit: 50 });
+  const tJobs = await resilient(() => api.job.list({ organizationId: org.id, limit: 50 }), []);
+  const jobs = tJobs as unknown as Job[];
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">

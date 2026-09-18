@@ -39,8 +39,8 @@ export async function getDb(): Promise<Db> {
 
   const client = new MongoClient(MONGODB_URI, {
     serverApi: { version: "1", deprecationErrors: true },
-    serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 30000),
-    connectTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 30000),
+    serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 10000),
+    connectTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 10000),
     socketTimeoutMS: 10000,
   });
   await client.connect();
