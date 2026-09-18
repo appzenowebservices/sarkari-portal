@@ -1,4 +1,16 @@
+import dns from "node:dns";
 import { MongoClient, Db, Collection, ObjectId } from "mongodb";
+
+// Pin public resolvers in the same module graph as the driver: on some
+// Windows machines Node's resolver points at a dead 127.0.0.1 stub (stale
+// VPN/AV hook), breaking mongodb+srv with querySrv ECONNREFUSED while
+// browsers keep working. Same fix as src/instrumentation.ts (belt & braces:
+// instrumentation runs once per boot, this runs wherever the driver loads).
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch {
+  // Non-fatal: fall back to the OS resolver.
+}
 
 // Single source of truth is DATABASE_URL (see .env.example).
 // MONGODB_URI is kept as an override for legacy setups.
@@ -15,6 +27,14 @@ const globalForDb = globalThis as typeof globalThis & {
 export async function getDb(): Promise<Db> {
   if (globalForDb.__addiesSarkariPortalDb) {
     return globalForDb.__addiesSarkariPortalDb;
+  }
+
+  // Re-pin here (not just module scope): Next dev serves requests from a
+  // worker whose resolver config may not inherit our startup pinning.
+  try {
+    dns.setServers(["8.8.8.8", "1.1.1.1"]);
+  } catch {
+    // Non-fatal: fall back to the OS resolver.
   }
 
   const client = new MongoClient(MONGODB_URI, {

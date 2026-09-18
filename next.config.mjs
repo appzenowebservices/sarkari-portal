@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    instrumentationHook: true,
+  },
   webpack: (config, { dev }) => {
     if (dev) {
       if (config.cache && typeof config.cache === "object") {

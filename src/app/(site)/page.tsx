@@ -18,6 +18,7 @@ import {
   getServicesByCategory,
   getTotalClicks,
 } from "@/lib/data";
+import type { Ad, CategoryWithCount, Job, ServiceWithCategory } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -50,15 +51,27 @@ const QUICK_SEARCHES = [
 ];
 
 export default async function HomePage() {
-  const [categories, popular, fresh, totalClicks, liveAds, servicesByCategory, latestJobs] = await Promise.all([
-    getCategories({ alphabetical: true }),
-    getPopular(10),
-    getFreshServices(10),
-    getTotalClicks(),
-    getAllLiveAds(),
-    getServicesByCategory(10, true),
-    getPublicJobs({ limit: 6, sort: "latest" }),
-  ]);
+  let categories: CategoryWithCount[] = [];
+  let popular: ServiceWithCategory[] = [];
+  let fresh: ServiceWithCategory[] = [];
+  let totalClicks = 0;
+  let liveAds: Record<string, Ad[]> = {};
+  let servicesByCategory: Record<string, ServiceWithCategory[]> = {};
+  let latestJobs: Job[] = [];
+
+  try {
+    [categories, popular, fresh, totalClicks, liveAds, servicesByCategory, latestJobs] = await Promise.all([
+      getCategories({ alphabetical: true }),
+      getPopular(10),
+      getFreshServices(10),
+      getTotalClicks(),
+      getAllLiveAds(),
+      getServicesByCategory(10, true),
+      getPublicJobs({ limit: 6, sort: "latest" }),
+    ]);
+  } catch {
+    // DB unreachable — render the page with empty sections instead of crashing.
+  }
 
   const totalServices = categories.reduce((acc, c) => acc + c.serviceCount, 0);
 

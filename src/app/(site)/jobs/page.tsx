@@ -16,16 +16,22 @@ export default async function JobsPage({
   searchParams: Promise<{ q?: string; status?: string; categoryId?: string; organizationId?: string; sort?: string }>;
 }) {
   const params = await searchParams;
-  const [jobs, stats] = await Promise.all([
-    getPublicJobs({
-      status: params.status || undefined,
-      categoryId: params.categoryId || undefined,
-      organizationId: params.organizationId || undefined,
-      sort: params.sort || undefined,
-      limit: 200,
-    }),
-    getJobStats(),
-  ]);
+  let jobs: Awaited<ReturnType<typeof getPublicJobs>> = [];
+  let stats = { totalJobs: 0, totalVacancies: 0 };
+  try {
+    [jobs, stats] = await Promise.all([
+      getPublicJobs({
+        status: params.status || undefined,
+        categoryId: params.categoryId || undefined,
+        organizationId: params.organizationId || undefined,
+        sort: params.sort || undefined,
+        limit: 200,
+      }),
+      getJobStats(),
+    ]);
+  } catch {
+    // DB unreachable — render the page with empty results instead of crashing.
+  }
 
   const flat = jobs.map((j) => {
     const category = (j as any).isGovernment !== false ? "government" : "private";
