@@ -11,14 +11,19 @@ export function StatCard({
   accent = "navy",
 }: {
   label: ReactNode;
-  value: number;
+  value: number | string;
   icon: string;
   sub?: ReactNode;
   accent?: "navy" | "saffron" | "green" | "sky";
 }) {
-  const [display, setDisplay] = useState(0);
+  const isNum = typeof value === "number";
+  const [display, setDisplay] = useState<number | string>(isNum ? 0 : value);
 
   useEffect(() => {
+    if (typeof value !== "number") {
+      setDisplay(value);
+      return;
+    }
     let raf = 0;
     const start = performance.now();
     const duration = 1000;
@@ -52,7 +57,7 @@ export function StatCard({
         )}
       </div>
       <p className="mt-4 font-display text-4xl font-bold leading-none tracking-tight text-navy-950 tnum">
-        {display.toLocaleString("en-IN")}
+        {typeof display === "number" ? display.toLocaleString("en-IN") : display}
       </p>
       <p className="mt-1.5 text-[13px] font-extrabold text-ink-soft">{label}</p>
     </div>

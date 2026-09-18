@@ -2,7 +2,8 @@ import Link from "next/link";
 import { BarsChart, StatCard } from "@/components/admin/widgets";
 import { Bi } from "@/components/bi";
 import { colorOf, Icon } from "@/components/icons";
-import { getDashboardStats, resilient } from "@/lib/data";
+import { resilient } from "@/lib/data";
+import { api } from "@/trpc/server";
 import { timeAgo } from "@/lib/utils";
 import { DateFilter } from "@/components/admin/date-filter";
 
@@ -12,26 +13,11 @@ export const metadata = { title: "Dashboard — Superadmin" };
 
 export default async function AdminDashboardPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
   const params = await searchParams;
-  const dateRange = params.from && params.to
-    ? {
-        from: new Date(params.from),
-        to: new Date(params.to),
-      }
-    : undefined;
-  const stats = await resilient(() => getDashboardStats(dateRange), {
-    totalServices: 0,
-    activeServices: 0,
-    totalCategories: 0,
-    totalClicks: 0,
-    todayClicks: 0,
-    totalAds: 0,
-    liveAds: 0,
-    totalAdRequests: 0,
-    pendingAdRequests: 0,
-    series: [],
-    topServices: [],
-    latestServices: [],
-  } as Awaited<ReturnType<typeof getDashboardStats>>);
+  const range =
+    params.from && params.to ? { from: params.from, to: params.to } : {};
+  // Dashboard reads from the tRPC/Prisma backend. Null when the DB is
+  // unreachable — cards below render "N/A" instead of misleading zeros.
+  const stats = await resilient(() => api.system.dashboardStats(range), null);
 
   return (
     <div>
@@ -53,14 +39,21 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
 
       <DateFilter />
 
+      {!stats && (
+        <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+          <Icon name="alert" size={16} className="shrink-0" />
+          Stats unavailable right now — showing N/A instead of stale numbers. Reload to retry.
+        </div>
+      )}
+
       {/* Stat cards — 6 cards in 2 rows */}
       <div className="grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Total Services" value={stats.totalServices} icon="link" accent="navy" sub={`${stats.activeServices} active`} />
-        <StatCard label="Categories" value={stats.totalCategories} icon="folder" accent="saffron" />
-        <StatCard label="Total Clicks" value={stats.totalClicks} icon="click" accent="green" />
-        <StatCard label="Today Clicks" value={stats.todayClicks} icon="trendingUp" accent="sky" />
-        <StatCard label="Ads" value={stats.totalAds} icon="megaphone" accent="saffron" sub={`${stats.liveAds} live`} />
-        <StatCard label="Ad Requests" value={stats.totalAdRequests} icon="inbox" accent="green" sub={stats.pendingAdRequests > 0 ? `${stats.pendingAdRequests} pending` : undefined} />
+        <StatCard label="Total Services" value={stats?.totalServices ?? "N/A"} icon="link" accent="navy" sub={stats ? `${stats.activeServices} active` : "N/A"} />
+        <StatCard label="Categories" value={stats?.totalCategories ?? "N/A"} icon="folder" accent="saffron" />
+        <StatCard label="Total Clicks" value={stats?.totalClicks ?? "N/A"} icon="click" accent="green" />
+        <StatCard label="Today Clicks" value={stats?.todayClicks ?? "N/A"} icon="trendingUp" accent="sky" />
+        <StatCard label="Ads" value={stats?.totalAds ?? "N/A"} icon="megaphone" accent="saffron" sub={stats ? `${stats.liveAds} live` : "N/A"} />
+        <StatCard label="Ad Requests" value={stats?.totalAdRequests ?? "N/A"} icon="inbox" accent="green" sub={stats && stats.pendingAdRequests > 0 ? `${stats.pendingAdRequests} pending` : undefined} />
       </div>
 
       {/* Chart + top services */}
@@ -73,7 +66,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
               <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-ink-soft">Click analytics</p>
             </div>
           </div>
-          <BarsChart series={stats.series} />
+          <BarsChart series={stats?.series ?? []} />
         </div>
 
         <div className="rounded-xl border border-navy-100 bg-surface p-5 shadow-sm sm:p-6">
@@ -85,7 +78,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
             </div>
           </div>
           <ol className="space-y-1">
-            {stats.topServices.map((s, i) => {
+            {(stats?.topServices ?? []).map((s, i) => {
               const cat = s.categories[0];
               const color = cat ? colorOf(cat.color) : colorOf("navy");
               return (
@@ -143,7 +136,7 @@ export default async function AdminDashboardPage({ searchParams }: { searchParam
             </Link>
           </div>
           <div className="divide-y divide-navy-50">
-            {stats.latestServices.map((s) => {
+            {(stats?.latestServices ?? []).map((s) => {
               const cat = s.categories[0];
               const color = cat ? colorOf(cat.color) : colorOf("navy");
               return (

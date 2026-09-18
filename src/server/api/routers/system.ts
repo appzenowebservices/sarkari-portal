@@ -92,15 +92,96 @@ export const systemRouter = createTRPCRouter({
     await ctx.db.admin.update({ where: { id: userId }, data: { passwordHash: await hashPassword(input.newPassword) } });
     return { ok: true };
   }),
-  dashboardStats: protectedProcedure.input(z.object({ days: z.number().optional().default(14) })).query(async ({ ctx, input }) => {
-    const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
-    const [jobs, services, subscribers, contacts, privacy, ads, payments] = await Promise.all([
-      ctx.db.job.count(), ctx.db.service.count(),
-      ctx.db.newsletterSubscriber.count(), ctx.db.contactRequest.count(),
-      ctx.db.privacyRequest.count(), ctx.db.advertisement.count(), ctx.db.payment.count(),
+  dashboardStats: protectedProcedure.input(z.object({ from: z.string().optional(), to: z.string().optional() })).query(async ({ ctx, input }) => {
+    const range = input.from && input.to ? { from: new Date(input.from), to: new Date(input.to) } : undefined;
+
+    const [totalCategories, totalServices, activeServices, totalAds, liveAds, totalAdRequests, pendingAdRequests] = await Promise.all([
+      ctx.db.category.count(),
+      ctx.db.service.count(),
+      ctx.db.service.count({ where: { isActive: true } }),
+      ctx.db.ad.count(),
+      ctx.db.ad.count({ where: { isPublished: true } }),
+      ctx.db.adRequest.count(),
+      ctx.db.adRequest.count({ where: { status: "pending" } }),
     ]);
-    const recentJobs = await ctx.db.job.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: 5 });
-    return { jobs, services, subscribers, contacts, privacy, ads, payments, recentJobs };
+
+    let totalClicks: number;
+    if (range) {
+      totalClicks = await ctx.db.serviceClick.count({
+        where: { createdAt: { gte: range.from, lte: range.to } },
+      });
+    } else {
+      const agg = await ctx.db.service.aggregate({ _sum: { clickCount: true } });
+      totalClicks = agg._sum.clickCount ?? 0;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    const from = range?.from ?? today;
+    const to = range?.to ?? endOfToday;
+    const todayClicks = await ctx.db.serviceClick.count({
+      where: { createdAt: { gte: from, lte: to } },
+    });
+
+    // Daily series across the range (default: last 14 days).
+    const start = range ? new Date(from) : new Date(Date.now() - 13 * 24 * 3600 * 1000);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    const clickRows = await ctx.db.serviceClick.findMany({
+      where: { createdAt: { gte: start, lte: end } },
+      select: { createdAt: true },
+    });
+    const perDay = new Map<string, number>();
+    for (const row of clickRows) {
+      const key = row.createdAt.toISOString().slice(0, 10);
+      perDay.set(key, (perDay.get(key) ?? 0) + 1);
+    }
+    const series: Array<{ day: string; label: string; count: number }> = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const key = cursor.toISOString().slice(0, 10);
+      series.push({
+        day: key,
+        label: cursor.toLocaleDateString("hi-IN", { day: "numeric", month: "short" }),
+        count: perDay.get(key) ?? 0,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // Category join for service rows (same shape as lib/data ServiceWithCategory).
+    const cats = await ctx.db.category.findMany();
+    const catsById = new Map(cats.map((c) => [c.id, c]));
+    const withCats = <S extends { categoryIds: string[] }>(rows: S[]) =>
+      rows.map((s) => ({
+        ...s,
+        categories: (s.categoryIds ?? [])
+          .map((id) => catsById.get(id))
+          .filter((c): c is (typeof cats)[number] => !!c)
+          .map((c) => ({ slug: c.slug, titleHi: c.titleHi, titleEn: c.titleEn, color: c.color, icon: c.icon })),
+      }));
+
+    const [topRaw, freshRaw] = await Promise.all([
+      ctx.db.service.findMany({ orderBy: [{ clickCount: "desc" }, { createdAt: "desc" }], take: 6 }),
+      ctx.db.service.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
+    ]);
+
+    return {
+      totalCategories,
+      totalServices,
+      activeServices,
+      totalClicks,
+      todayClicks,
+      totalAds,
+      liveAds,
+      totalAdRequests,
+      pendingAdRequests,
+      series,
+      topServices: withCats(topRaw),
+      latestServices: withCats(freshRaw),
+    };
   }),
   search: publicProcedure.input(z.object({ q: z.string().min(2), limit: z.number().optional().default(10) })).query(async ({ ctx, input }) => {
     const [services, jobs] = await Promise.all([
