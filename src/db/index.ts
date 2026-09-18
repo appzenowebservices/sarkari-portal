@@ -13,8 +13,9 @@ try {
 }
 
 // Single source of truth is DATABASE_URL (see .env.example).
-// MONGODB_URI is kept as an override for legacy setups.
-const MONGODB_URI = (process.env.MONGODB_URI ?? process.env.DATABASE_URL) as string;
+// MONGODB_URI is only a legacy fallback — DATABASE_URL always wins so a
+// stale override can never silently break reads while Prisma keeps working.
+const MONGODB_URI = (process.env.DATABASE_URL ?? process.env.MONGODB_URI) as string;
 
 if (!MONGODB_URI) {
   throw new Error("DATABASE_URL is required");

@@ -45,8 +45,15 @@ export async function resilient<T>(fn: () => Promise<T>, fallback: T, retries = 
   for (let i = 0; i <= retries; i++) {
     try {
       return await fn();
-    } catch {
-      if (i < retries) await sleep(2000 * (i + 1));
+    } catch (e) {
+      if (i < retries) {
+        await sleep(2000 * (i + 1));
+      } else {
+        // Final failure: log it (server-side only) so production logs show
+        // the real reason instead of silently rendering empty sections.
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[db] query failed after ${retries + 1} attempts: ${msg.slice(0, 300)}`);
+      }
     }
   }
   return fallback;
