@@ -1,24 +1,25 @@
+# Production compose for sarkari-portal.
+# `.env` (same directory) provides values for BOTH build.args and the container.
+# Required in `.env`: DATABASE_URL, AUTH_SECRET, NEXT_PUBLIC_SITE_URL
 services:
-  sarkari-portal:
-    build: .
-    image: sarkari-portal
-    container_name: sarkari-portal
-    restart: unless-stopped
+  web:
+    build:
+      context: .
+      args:
+        DATABASE_URL: ${DATABASE_URL:-}
+        AUTH_SECRET: ${AUTH_SECRET:-}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-}
+        SKIP_ENV_VALIDATION: ${SKIP_ENV_VALIDATION:-}
+    image: sarkari-portal:latest
+    container_name: sarkari-portal-web
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      HOSTNAME: "0.0.0.0"
       PORT: 3000
-    networks:
-      - web
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 40s
-
-networks:
-  web:
-    external: true
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    # Guard against thread-exhaustion crashes on small boxes
+    # ("pthread_create: Resource temporarily unavailable").
+    pids_limit: 4096

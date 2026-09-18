@@ -1,0 +1,24 @@
+# Keep the build context small and secret-free.
+# NOTE: `.env*` is excluded on purpose — build-time env comes from
+# docker-compose `build.args`, runtime env from `env_file: .env`.
+.git
+.gitignore
+dummy_T3
+.next
+src/.next
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.env*
+!.env.example
+oc.md
+*.log
+.turbo
+coverage
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+*.tsbuildinfo
