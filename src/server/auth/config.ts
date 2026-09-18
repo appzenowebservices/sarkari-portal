@@ -6,6 +6,9 @@ import { db } from "@/server/db";
 import { verifyPassword } from "@/lib/auth";
 
 export const authConfig = {
+  // Behind Caddy (reverse proxy) Auth.js must trust X-Forwarded-Host.
+  // Also set AUTH_TRUST_HOST=true in production env (belt & braces).
+  trustHost: true,
   providers: [
     CredentialsProvider({
       name: "Credentials",

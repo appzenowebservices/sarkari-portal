@@ -6,6 +6,7 @@ const isProd = process.env.NODE_ENV === "production";
 export const env = createEnv({
   server: {
     AUTH_SECRET: isProd ? z.string() : z.string().optional(),
+    AUTH_TRUST_HOST: z.string().optional(),
     DATABASE_URL: isProd ? z.string() : z.string().optional(),
     MONGODB_URI: isProd ? z.string() : z.string().optional(),
     MONGODB_TIMEOUT_MS: z.string().optional(),
@@ -18,6 +19,7 @@ export const env = createEnv({
   },
   runtimeEnv: {
     AUTH_SECRET: process.env.AUTH_SECRET,
+    AUTH_TRUST_HOST: process.env.AUTH_TRUST_HOST,
     DATABASE_URL: process.env.DATABASE_URL ?? process.env.MONGODB_URI,
     MONGODB_URI: process.env.MONGODB_URI ?? process.env.DATABASE_URL,
     MONGODB_TIMEOUT_MS: process.env.MONGODB_TIMEOUT_MS,
